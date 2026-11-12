@@ -1,0 +1,2050 @@
+=-=-=-= Doação -=-=-=-=-=-
+
+import React, { useState, useEffect } from 'react';
+import { useDoacao } from '../../hooks/useDoacao'; // Ajuste os caminhos conforme seu projeto
+import { useDoadores } from '../../hooks/useDoadores';
+import { useProdutos } from '../../hooks/useProdutos';
+
+export default function EntradaDoacoes() {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  
+  // Hooks
+  const { doacoesHistorico, isLoading, createDoacao, fetchDoacoes } = useDoacao();
+  const { doadores, fetchDoadores } = useDoadores();
+  const { produtos, fetchProdutos } = useProdutos();
+
+  // Estados da Tela Principal (Filtros e Expansão)
+  const [searchTerm, setSearchTerm] = useState('');
+  const [expandedRows, setExpandedRows] = useState([]);
+
+  // Estados do Modal
+  const [doadorIdAtual, setDoadorIdAtual] = useState('');
+  const [itensCarrinho, setItensCarrinho] = useState([]);
+  
+  // Estados do Item Atual
+  const [produtoIdAtual, setProdutoIdAtual] = useState('');
+  const [qtdAtual, setQtdAtual] = useState('');
+  const [validadeAtual, setValidadeAtual] = useState('');
+
+  // Busca os dados iniciais ao montar a tela
+  useEffect(() => {
+    fetchDoacoes();
+    fetchDoadores();
+    fetchProdutos();
+  }, [fetchDoacoes, fetchDoadores, fetchProdutos]);
+
+  // --- Lógica de Agrupamento e Filtro da Tabela ---
+  
+  // 1. Agrupa o histórico (que estava achatado) pelo ID da Doação
+  const historicoAgrupado = Object.values(doacoesHistorico.reduce((acc, curr) => {
+    if (!acc[curr.idDisplay]) {
+      acc[curr.idDisplay] = {
+        idDisplay: curr.idDisplay,
+        data: curr.data,
+        doador: curr.doador,
+        itens: []
+      };
+    }
+    acc[curr.idDisplay].itens.push({
+      produto: curr.produto,
+      quantidade: curr.quantidade,
+      validade: curr.validade
+    });
+    return acc;
+  }, {}));
+
+  // 2. Filtra pelo nome do doador de acordo com a barra de pesquisa
+  const historicoFiltrado = historicoAgrupado.filter(doacao =>
+    doacao.doador.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  // 3. Função para abrir/fechar os detalhes da doação
+  const toggleRow = (idDisplay) => {
+    setExpandedRows(prev => 
+      prev.includes(idDisplay) 
+        ? prev.filter(id => id !== idDisplay) // Remove se já estiver aberto
+        : [...prev, idDisplay] // Adiciona se estiver fechado
+    );
+  };
+
+  // --- Funções do Carrinho ---
+
+  const adicionarAoCarrinho = (e) => {
+    e.preventDefault();
+    if (!produtoIdAtual || !qtdAtual) return;
+
+    const produtoSelecionado = produtos.find(p => p.id.toString() === produtoIdAtual);
+
+    const novoItem = {
+      idTemp: Date.now(), 
+      produtoId: parseInt(produtoIdAtual),
+      nome: produtoSelecionado?.nome || 'Produto Desconhecido',
+      quantidade: parseFloat(qtdAtual).toFixed(2),
+      validade: validadeAtual 
+    };
+
+    setItensCarrinho([...itensCarrinho, novoItem]);
+    
+    setProdutoIdAtual('');
+    setQtdAtual('');
+    setValidadeAtual('');
+  };
+
+  const removerDoCarrinho = (idTemp) => {
+    setItensCarrinho(itensCarrinho.filter(item => item.idTemp !== idTemp));
+  };
+
+  const fecharModal = () => {
+    setIsModalOpen(false);
+    setItensCarrinho([]); 
+    setDoadorIdAtual('');
+    setProdutoIdAtual('');
+    setQtdAtual('');
+    setValidadeAtual('');
+  };
+
+  const handleConcluirRecebimento = async () => {
+    if (!doadorIdAtual || itensCarrinho.length === 0) {
+        alert("Selecione um doador e adicione pelo menos um item.");
+        return;
+    }
+
+    const payload = {
+        doadorId: parseInt(doadorIdAtual),
+        data: new Date().toISOString(), 
+        itens: itensCarrinho.map(item => ({
+            produtoId: item.produtoId,
+            quantidade: parseFloat(item.quantidade),
+            dataValidade: item.validade ? new Date(item.validade).toISOString() : null
+        }))
+    };
+
+    const result = await createDoacao(payload);
+    
+    if (result.success) {
+        fecharModal();
+        fetchDoacoes(); 
+    } else {
+        alert(`Erro: ${result.message}`);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#F8F9FA] text-[#2D3748] p-8 font-sans">
+      
+      {/* HEADER */}
+      <div className="flex justify-between items-center mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-[#2D3748]">Entrada de Doações</h1>
+          <p className="text-sm text-[#718096] mt-1">Gerencie o recebimento de produtos e controle o histórico de entradas.</p>
+        </div>
+        <button 
+          onClick={() => setIsModalOpen(true)}
+          className="bg-[#007F45] hover:bg-[#006838] text-white px-4 py-2 rounded-md font-medium transition-colors flex items-center gap-2 text-sm shadow-sm"
+        >
+          <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
+          Registrar Nova Entrada
+        </button>
+      </div>
+
+      {/* BARRA DE PESQUISA */}
+      <div className="bg-white p-4 rounded-lg shadow-sm mb-6 border border-gray-100 flex gap-4">
+        <div className="relative w-full max-w-md">
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <svg className="h-4 w-4 text-[#718096]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+          </div>
+          <input 
+            type="text" 
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Buscar pelo nome do doador..." 
+            className="block w-full pl-10 pr-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#007F45] focus:border-[#007F45]"
+          />
+        </div>
+      </div>
+
+      {/* TABELA DE HISTÓRICO COM AGRUPAMENTO */}
+      <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 border-b border-gray-100 text-[#718096]">
+            <tr>
+              <th className="px-6 py-4 font-medium text-left w-24">ID</th>
+              <th className="px-6 py-4 font-medium text-left">Data</th>
+              <th className="px-6 py-4 font-medium text-left w-1/3">Doador</th>
+              <th className="px-6 py-4 font-medium text-center">Volume</th>
+              <th className="px-12 py-4 font-medium text-right">Ação</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100 text-[#2D3748]">
+            {isLoading ? (
+                <tr><td colSpan="5" className="p-6 text-center text-gray-500">Carregando histórico...</td></tr>
+            ) : historicoFiltrado.length === 0 ? (
+                <tr><td colSpan="5" className="p-6 text-center text-gray-500">Nenhuma doação encontrada.</td></tr>
+            ) : (
+                historicoFiltrado.map((doacao) => (
+                  <React.Fragment key={doacao.idDisplay}>
+                    {/* Linha Principal da Doação */}
+                    <tr className={`hover:bg-gray-50 transition-colors ${expandedRows.includes(doacao.idDisplay) ? 'bg-gray-50' : ''}`}>
+                        <td className="px-6 py-4 font-mono text-xs text-[#718096] whitespace-nowrap">{doacao.idDisplay}</td>
+                        <td className="px-6 py-4 text-left whitespace-nowrap">{doacao.data}</td>
+                        <td className="px-6 py-4 font-medium text-left whitespace-nowrap">{doacao.doador}</td>
+                        <td className="px-6 py-4 text-center">
+                          <span className="bg-[#EDF2F7] text-[#4A5568] px-3 py-1 rounded-full text-xs font-semibold">
+                            {doacao.itens.length} iten(s)
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <button 
+                            onClick={() => toggleRow(doacao.idDisplay)}
+                            className="text-[#007F45] hover:text-[#006838] font-medium flex items-center justify-end gap-1 w-full outline-none"
+                          >
+                            {expandedRows.includes(doacao.idDisplay) ? 'Ocultar' : 'Ver itens'}
+                            <svg className={`w-4 h-4 transition-transform ${expandedRows.includes(doacao.idDisplay) ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                          </button>
+                        </td>
+                    </tr>
+
+                    {/* Linha Expandida (Sub-tabela de Itens) */}
+                    {expandedRows.includes(doacao.idDisplay) && (
+                      <tr>
+                        <td colSpan="5" className="p-0 border-b border-gray-100 bg-[#FAFAFA]">
+                          <div className="px-8 py-4 border-l-4 border-[#007F45]">
+                            <table className="w-full text-xs">
+                              <thead className="text-[#718096] border-b border-gray-200">
+                                <tr>
+                                  <th className="pb-2 font-medium text-left">Produto</th>
+                                  <th className="pb-2 font-medium text-left">Quantidade</th>
+                                  <th className="pb-2 font-medium text-left">Validade</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-100">
+                                {doacao.itens.map((item, idx) => (
+                                  <tr key={idx} className="hover:bg-gray-100 transition-colors">
+                                    <td className="py-2.5 text-left font-medium text-[#4A5568]">{item.produto}</td>
+                                    <td className="py-2.5 text-left font-semibold">{item.quantidade}</td>
+                                    <td className="py-2.5 text-left text-[#718096]">{item.validade}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* MODAL DE REGISTRO */}
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-[#0F172A]/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-[800px] max-h-[90vh] flex flex-col overflow-hidden">
+            
+            <div className="flex justify-between items-center p-5 border-b border-gray-100 shrink-0">
+              <h2 className="text-xl font-bold text-[#1A202C]">Registrar Nova Entrada</h2>
+              <button onClick={fecharModal} className="text-[#A0AEC0] hover:text-[#4A5568] transition-colors p-1 rounded-md hover:bg-gray-100">
+                <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-8 bg-[#FAFAFA]">
+              
+              {/* SEÇÃO 1: DOADOR */}
+              <section className="bg-white p-5 rounded-lg border border-gray-200 shadow-sm">
+                <h3 className="text-xs font-bold text-[#718096] uppercase tracking-wider mb-4 flex items-center gap-2">
+                  <span className="w-5 h-5 rounded-full bg-gray-100 flex items-center justify-center text-[10px]">1</span>
+                  Responsável
+                </h3>
+                <div>
+                  <label className="block text-sm font-medium mb-1 text-[#4A5568]">Doador <span className="text-red-500">*</span></label>
+                  <select 
+                    value={doadorIdAtual}
+                    onChange={(e) => setDoadorIdAtual(e.target.value)}
+                    className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-1 focus:ring-[#007F45] focus:outline-none bg-white"
+                  >
+                    <option value="">Selecione um doador...</option>
+                    {doadores.map(d => (
+                        <option key={d.id} value={d.id}>{d.nome}</option>
+                    ))}
+                  </select>
+                </div>
+              </section>
+
+              {/* SEÇÃO 2: ÁREA DE ADIÇÃO DE ITENS */}
+              <section>
+                <h3 className="text-xs font-bold text-[#718096] uppercase tracking-wider mb-4 flex items-center gap-2">
+                  <span className="w-5 h-5 rounded-full bg-gray-100 flex items-center justify-center text-[10px]">2</span>
+                  Adicionar Produtos
+                </h3>
+                <div className="bg-white p-4 rounded-lg border border-[#E2E8F0] shadow-sm">
+                  <form onSubmit={adicionarAoCarrinho} className="grid grid-cols-12 gap-3 items-end">
+                    <div className="col-span-12 md:col-span-5">
+                      <label className="block text-sm font-medium mb-1 text-[#4A5568]">Produto <span className="text-red-500">*</span></label>
+                      <select 
+                        value={produtoIdAtual}
+                        onChange={(e) => setProdutoIdAtual(e.target.value)}
+                        className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-1 focus:ring-[#007F45] focus:outline-none bg-white"
+                      >
+                        <option value="">Selecione...</option>
+                        {produtos.map(p => (
+                            <option key={p.id} value={p.id}>{p.nome}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="col-span-6 md:col-span-2">
+                      <label className="block text-sm font-medium mb-1 text-[#4A5568]">Qtd. <span className="text-red-500">*</span></label>
+                      <input 
+                        type="number" 
+                        step="0.01" min="0.01"
+                        value={qtdAtual}
+                        onChange={(e) => setQtdAtual(e.target.value)}
+                        className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-1 focus:ring-[#007F45] focus:outline-none" 
+                        placeholder="0.00" 
+                      />
+                    </div>
+                    <div className="col-span-6 md:col-span-3">
+                      <label className="block text-sm font-medium mb-1 text-[#4A5568]">Validade <span className="text-red-500">*</span></label>
+                      <input 
+                        type="date" 
+                        value={validadeAtual}
+                        onChange={(e) => setValidadeAtual(e.target.value)}
+                        className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-1 focus:ring-[#007F45] focus:outline-none" 
+                      />
+                    </div>
+                    <div className="col-span-12 md:col-span-2">
+                      <button 
+                        type="submit"
+                        disabled={!produtoIdAtual || !qtdAtual || !validadeAtual}
+                        className="w-full bg-[#EDF2F7] hover:bg-[#E2E8F0] text-[#2D3748] font-medium py-2 rounded-md transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed border border-gray-200"
+                      >
+                        Inserir
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </section>
+
+              {/* SEÇÃO 3: O CARRINHO */}
+              <section>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="text-xs font-bold text-[#718096] uppercase tracking-wider flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-gray-100 flex items-center justify-center text-[10px]">3</span>
+                    Itens desta Doação
+                  </h3>
+                  <span className="text-xs font-medium text-[#718096] bg-gray-100 px-2 py-1 rounded-full">{itensCarrinho.length} iten(s)</span>
+                </div>
+                
+                <div className="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm min-h-[120px]">
+                  {itensCarrinho.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-32 text-[#A0AEC0]">
+                      <svg className="w-8 h-8 mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path></svg>
+                      <p className="text-sm">Nenhum item adicionado ainda.</p>
+                    </div>
+                  ) : (
+                    <ul className="divide-y divide-gray-100">
+                      {itensCarrinho.map((item) => (
+                        <li key={item.idTemp} className="p-3 hover:bg-gray-50 flex justify-between items-center group">
+                          <div>
+                            <p className="text-sm font-semibold text-[#2D3748]">{item.nome}</p>
+                            <p className="text-xs text-[#718096]">Validade: <span className="font-medium text-[#4A5568]">{new Date(item.validade).toLocaleDateString('pt-BR')}</span></p>
+                          </div>
+                          <div className="flex items-center gap-4">
+                            <span className="text-sm font-mono font-medium text-[#2D3748]">{item.quantidade} un</span>
+                            <button 
+                              onClick={() => removerDoCarrinho(item.idTemp)}
+                              className="text-red-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                              title="Remover item"
+                            >
+                              <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </section>
+
+            </div>
+
+            <div className="p-5 border-t border-gray-100 bg-white flex justify-between items-center shrink-0">
+              <button onClick={fecharModal} className="text-[#718096] text-sm font-medium hover:text-[#2D3748] transition-colors">
+                Cancelar Transação
+              </button>
+              <button 
+                onClick={handleConcluirRecebimento}
+                disabled={itensCarrinho.length === 0 || !doadorIdAtual || isLoading}
+                className="bg-[#007F45] hover:bg-[#006838] text-white px-6 py-2.5 rounded-md font-medium text-sm transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {isLoading ? 'Processando...' : 'Concluir Recebimento'}
+                {!isLoading && <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>}
+              </button>
+            </div>
+            
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+=-=-=-= Doadores -=-=-=-=-=-
+
+
+import React, { useState, useEffect } from 'react';
+import { useDoadores } from '../../hooks/useDoadores';
+
+export default function DoadoresIndex() {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const { doadores, loading, fetchDoadores, createDoador } = useDoadores();
+
+  const [formData, setFormData] = useState({
+    nome: '', email: '', cpf: '', telefone: '', endereco: ''
+  });
+
+  // --- Funções de Formatação (Máscaras de Visualização) ---
+  const formatCPF = (value) => {
+    if (!value) return "";
+    return value
+      .replace(/\D/g, '') 
+      .replace(/(\d{3})(\d)/, '$1.$2')
+      .replace(/(\d{3})(\d)/, '$1.$2')
+      .replace(/(\d{3})(\d{1,2})/, '$1-$2')
+      .replace(/(-\d{2})\d+?$/, '$1'); 
+  };
+
+  const formatTelefone = (value) => {
+    if (!value) return "";
+    return value
+      .replace(/\D/g, '')
+      .replace(/(\d{2})(\d)/, '($1) $2')
+      .replace(/(\d{5})(\d)/, '$1-$2')
+      .replace(/(-\d{4})\d+?$/, '$1'); 
+  };
+
+  // --- Função para limpar máscara (Sanitização para o Banco) ---
+  const stripMask = (value) => value.replace(/\D/g, '');
+
+  useEffect(() => {
+    const delayDebounce = setTimeout(() => {
+      fetchDoadores(searchTerm);
+    }, 500);
+    return () => clearTimeout(delayDebounce);
+  }, [searchTerm, fetchDoadores]);
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    let formattedValue = value;
+
+    if (name === 'cpf') formattedValue = formatCPF(value);
+    if (name === 'telefone') formattedValue = formatTelefone(value);
+
+    setFormData(prev => ({ ...prev, [name]: formattedValue }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    // Engenharia de Software: Criamos um DTO de envio limpo
+    // Não alteramos o estado do formulário para não "pular" a máscara na tela do usuário
+    const dataToSubmit = {
+      ...formData,
+      cpf: stripMask(formData.cpf),
+      telefone: stripMask(formData.telefone)
+    };
+
+    try {
+      await createDoador(dataToSubmit); // Envia apenas números
+      setIsModalOpen(false);
+      setFormData({ nome: '', email: '', cpf: '', telefone: '', endereco: '' });
+      fetchDoadores();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#F8F9FA] text-[#2D3748] p-8 font-sans">
+      
+      {/* Header */}
+      <div className="flex justify-between items-center mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-[#2D3748]">Doadores</h1>
+          <p className="text-sm text-[#718096] mt-1">Gestão da rede de parceiros e doadores da instituição.</p>
+        </div>
+        <button
+          onClick={() => setIsModalOpen(true)}
+          className="bg-[#007F45] hover:bg-[#006838] text-white px-4 py-2 rounded-md font-medium transition-colors flex items-center gap-2 text-sm shadow-sm"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          Cadastrar Doador
+        </button>
+      </div>
+
+      {/* Filtros */}
+      <div className="bg-white p-4 rounded-lg shadow-sm mb-6 border border-gray-100">
+        <div className="relative w-full max-w-md">
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <svg className="h-4 w-4 text-[#718096]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+          </div>
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Buscar por nome, CPF ou e-mail..."
+            className="block w-full pl-10 pr-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#007F45] focus:border-[#007F45]"
+          />
+        </div>
+      </div>
+
+      {/* Tabela */}
+      <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 border-b border-gray-100 text-[#718096]">
+            <tr>
+              <th className="px-6 py-4 font-medium text-left">Nome</th>
+              <th className="px-6 py-4 font-medium text-left">E-mail</th>
+              <th className="px-6 py-4 font-medium text-left">Telefone</th>
+              <th className="px-6 py-4 font-medium text-left">CPF</th>
+              <th className="px-6 py-4 font-medium text-left">Endereço</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100 text-[#2D3748]">
+            {loading ? (
+                <tr><td colSpan="5" className="text-center py-10">Carregando doadores...</td></tr>
+            ) : doadores.map((doador) => (
+              <tr key={doador.id} className="hover:bg-gray-50 transition-colors">
+                <td className="px-6 py-4 font-bold text-left">{doador.nome}</td>
+                <td className="px-6 py-4 text-left">{doador.email}</td>
+                {/* Visualização Formatada para o Usuário */}
+                <td className="px-6 py-4 text-left">{formatTelefone(doador.telefone)}</td>
+                <td className="px-6 py-4 text-left">{formatCPF(doador.cpf)}</td>
+                <td className="px-6 py-4 text-left text-[#718096] whitespace-nowrap">
+                  {doador.endereco}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Modal de Cadastro */}
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-[650px] overflow-hidden">
+            <div className="flex justify-between items-center p-6 border-b border-gray-100">
+              <h2 className="text-xl font-bold">Cadastrar Doador</h2>
+              <button onClick={() => setIsModalOpen(false)} className="text-[#718096] hover:text-[#2D3748]">
+                <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit}>
+                <div className="p-6">
+                <div className="grid grid-cols-12 gap-4">
+                    <div className="col-span-12">
+                      <label className="block text-sm font-medium mb-1 text-[#4A5568]">Nome Completo</label>
+                      <input name="nome" value={formData.nome} onChange={handleInputChange} required type="text" placeholder="Insira o nome completo" className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-1 focus:ring-[#007F45] focus:outline-none" />
+                    </div>
+
+                    <div className="col-span-12 md:col-span-6">
+                      <label className="block text-sm font-medium mb-1 text-[#4A5568]">E-mail</label>
+                      <input name="email" value={formData.email} onChange={handleInputChange} required type="email" placeholder="Ex: doador@exemplo.com" className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-1 focus:ring-[#007F45] focus:outline-none" />
+                    </div>
+                    
+                    <div className="col-span-12 md:col-span-6">
+                      <label className="block text-sm font-medium mb-1 text-[#4A5568]">CPF</label>
+                      <input name="cpf" value={formData.cpf} onChange={handleInputChange} required type="text" className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-1 focus:ring-[#007F45] focus:outline-none" placeholder="000.000.000-00" maxLength="14" />
+                    </div>
+
+                    <div className="col-span-12 md:col-span-4">
+                      <label className="block text-sm font-medium mb-1 text-[#4A5568]">Telefone</label>
+                      <input name="telefone" value={formData.telefone} onChange={handleInputChange} required type="text" className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-1 focus:ring-[#007F45] focus:outline-none" placeholder="(00) 00000-0000" maxLength="15" />
+                    </div>
+
+                    <div className="col-span-12 md:col-span-8">
+                      <label className="block text-sm font-medium mb-1 text-[#4A5568]">Endereço Completo</label>
+                      <input name="endereco" value={formData.endereco} onChange={handleInputChange} required type="text" placeholder="Rua, Numero - Bairro, Cidade - UF" className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-1 focus:ring-[#007F45] focus:outline-none" />
+                    </div>
+                </div>
+                </div>
+
+                <div className="p-6 border-t border-gray-100 flex justify-between items-center bg-gray-50">
+                <button type="button" onClick={() => setIsModalOpen(false)} className="text-[#718096] text-sm font-medium hover:text-[#2D3748]">Cancelar</button>
+                <button type="submit" className="bg-[#007F45] hover:bg-[#006838] text-white px-6 py-2 rounded-md font-medium text-sm shadow-sm transition-all">
+                    Salvar Doador
+                </button>
+                </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );    
+}
+
+=-=-=-= Estoque -=-=-=-=-=-
+
+import React, { useState, useEffect, useMemo } from 'react';
+import { useEstoque } from '../../hooks/useEstoque'; // Ajuste o caminho conforme a sua estrutura de pastas
+
+export default function EstoqueIndex() {
+  const { estoque, isLoading, error, fetchEstoque } = useEstoque();
+  
+  // Estados para os filtros
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('Todos os Status');
+
+  // Busca os dados assim que a tela é montada
+  useEffect(() => {
+    fetchEstoque();
+  }, [fetchEstoque]);
+
+  // 1. Lógica dos Mini Relatórios (KPIs) calculada dinamicamente
+// 1. Lógica dos Mini Relatórios (KPIs) calculada dinamicamente
+  const metrics = useMemo(() => {
+    let skusAtivos = 0;
+    let baixoEstoque = 0; // Mudamos o nome aqui
+    let vencimentoProximo = 0;
+
+    const hoje = new Date();
+
+    estoque.forEach(item => {
+      // Conta SKUs ativos (que têm pelo menos 1 item no estoque)
+      if (item.qtd > 0) skusAtivos++;
+      
+      // NOVA LÓGICA: Conta itens que estão com o status de baixo estoque
+      if (item.status?.toLowerCase() === 'baixo estoque') {
+        baixoEstoque++;
+      }
+
+      // Calcula proximidade de vencimento (90 dias)
+      if (item.validade && item.validade !== 'N/A') {
+        const [dia, mes, ano] = item.validade.split('/');
+        const dataValidade = new Date(`${ano}-${mes}-${dia}T00:00:00`);
+        
+        const diffTempo = dataValidade.getTime() - hoje.getTime();
+        const diffDias = Math.ceil(diffTempo / (1000 * 3600 * 24));
+        
+        if (diffDias > 0 && diffDias <= 90 && item.qtd > 0) { // Adicionamos item.qtd > 0 aqui também
+          vencimentoProximo++;
+        }
+      }
+    });
+
+    return { skusAtivos, baixoEstoque, vencimentoProximo }; // Retornamos baixoEstoque
+  }, [estoque]);
+
+  // 2. Lógica do Filtro Robusto
+  const estoqueFiltrado = useMemo(() => {
+    return estoque.filter((item) => {
+      // Normaliza a busca para evitar erros com maiúsculas/minúsculas
+      const search = searchTerm.toLowerCase().trim();
+      
+      // Validação de segurança para campos que podem vir nulos
+      const nome = item.nome?.toLowerCase() || '';
+      const lote = item.lote?.toLowerCase() || '';
+      const origem = item.origem?.toLowerCase() || '';
+      const statusItem = item.status?.toLowerCase() || '';
+
+      const matchBusca = 
+        nome.includes(search) || 
+        lote.includes(search) || 
+        origem.includes(search);
+
+      const matchStatus = 
+        statusFilter === 'Todos os Status' || 
+        statusItem === statusFilter.toLowerCase();
+
+      return matchBusca && matchStatus;
+    });
+  }, [estoque, searchTerm, statusFilter]);
+
+  const getStatusColor = (status) => {
+    // Normalizando a string para evitar quebras por diferenças de casing
+    const st = status?.toLowerCase();
+    switch (st) {
+      case 'disponível': return 'bg-green-50 text-green-700 border-green-100';
+      case 'baixo estoque': return 'bg-orange-50 text-orange-700 border-orange-100';
+      case 'esgotado': return 'bg-red-50 text-red-700 border-red-100';
+      default: return 'bg-gray-50 text-gray-700';
+    }
+  };
+
+  const checkVencimentoProximo = (validade) => {
+  if (!validade || validade === 'N/A') return false;
+  const [dia, mes, ano] = validade.split('/');
+  const dataValidade = new Date(`${ano}-${mes}-${dia}T00:00:00`);
+  const hoje = new Date();
+  const diffTempo = dataValidade.getTime() - hoje.getTime();
+  const diffDias = Math.ceil(diffTempo / (1000 * 3600 * 24));
+  return diffDias > 0 && diffDias <= 90;
+};
+
+  return (
+    <div className="min-h-screen bg-[#F8F9FA] text-[#2D3748] p-8 font-sans">
+      
+      {/* HEADER */}
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold text-[#2D3748]">Controle de Estoque</h1>
+        <p className="text-sm text-[#718096] mt-1">Gestão inteligente de itens e prazos.</p>
+      </div>
+
+      {/* DASHBOARD CARDS */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm flex flex-col justify-between">
+          <span className="text-xs uppercase tracking-wider font-bold text-[#718096]">Total de Itens</span>
+          <div className="flex items-baseline gap-2 mt-2">
+            <span className="text-3xl font-extrabold">{metrics.skusAtivos}</span>
+            <span className="text-xs text-green-600 font-medium">SKUs ativos</span>
+          </div>
+        </div>
+        
+      <div className="bg-white p-5 rounded-xl border-l-4 border-l-amber-500 shadow-sm flex flex-col justify-between border-y border-r border-gray-100">
+        <span className="text-xs uppercase tracking-wider font-bold text-[#718096]">Baixo Estoque</span>
+        <div className="flex items-baseline gap-2 mt-2">
+          <span className="text-3xl font-extrabold text-amber-600">{metrics.baixoEstoque}</span>
+          <span className="text-xs text-amber-500 font-medium">Ação preventiva</span>
+        </div>
+      </div>
+
+        <div className="bg-white p-5 rounded-xl border-l-4 border-l-orange-400 shadow-sm flex flex-col justify-between border-y border-r border-gray-100">
+          <span className="text-xs uppercase tracking-wider font-bold text-[#718096]">Próximos ao Vencimento</span>
+          <div className="flex items-baseline gap-2 mt-2">
+            <span className="text-3xl font-extrabold text-orange-600">{metrics.vencimentoProximo}</span>
+            <span className="text-xs text-orange-400">Prox. 3 Meses</span>
+          </div>
+        </div>
+      </div>
+
+      {/* FILTROS */}
+      <div className="bg-white p-4 rounded-t-xl border border-gray-100 flex flex-col md:flex-row gap-4">
+        <div className="relative flex-grow">
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <svg className="h-4 w-4 text-[#718096]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+            </svg>
+          </div>
+          <input 
+            type="text" 
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Filtrar produtos por nome ou origem..." 
+            className="block w-full pl-10 pr-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#007F45]/20 focus:border-[#007F45] outline-none"
+          />
+        </div>
+        <div className="flex gap-2">
+            <select 
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="py-2 px-3 border border-gray-200 rounded-lg text-sm focus:border-[#007F45] outline-none bg-white font-medium"
+            >
+                <option value="Todos os Status">Todos os Status</option>
+                <option value="Disponível">Disponível</option>
+                <option value="Baixo estoque">Baixo Estoque</option>
+            </select>
+        </div>
+      </div>
+
+      {/* ESTADOS DE CARREGAMENTO E ERRO */}
+      {isLoading && (
+        <div className="bg-white p-8 text-center text-gray-500 border-x border-b border-gray-100 rounded-b-xl">
+          Carregando estoque...
+        </div>
+      )}
+
+      {error && !isLoading && (
+        <div className="bg-white p-8 text-center text-red-500 border-x border-b border-gray-100 rounded-b-xl">
+          Erro ao carregar dados: {error}
+        </div>
+      )}
+
+      {/* TABELA */}
+      {!isLoading && !error && (
+        <div className="bg-white rounded-b-xl shadow-sm border-x border-b border-gray-100 overflow-x-auto">
+          <table className="w-full text-sm min-w-[900px]">
+            <thead className="bg-gray-50/50 border-b border-gray-100 text-[#718096]">
+              <tr>
+                <th className="px-5 py-4 font-semibold text-left uppercase tracking-tighter text-[11px]">Produto</th>
+                <th className="px-4 py-4 font-semibold text-left uppercase tracking-tighter text-[11px]">Estoque Atual</th>
+                <th className="px-4 py-4 font-semibold text-left uppercase tracking-tighter text-[11px]">Status</th>
+                <th className="px-4 py-4 font-semibold text-left uppercase tracking-tighter text-[11px]">Origem</th>
+                <th className="px-4 py-4 font-semibold text-left uppercase tracking-tighter text-[11px]">Entrada</th>
+                <th className="px-4 py-4 font-semibold text-left uppercase tracking-tighter text-[11px]">Validade</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {estoqueFiltrado.length === 0 ? (
+                <tr>
+                  <td colSpan="6" className="px-5 py-8 text-center text-gray-500">
+                    Nenhum produto encontrado.
+                  </td>
+                </tr>
+              ) : (
+                estoqueFiltrado.map((item) => (
+                  <tr key={item.id} className="hover:bg-gray-50/80 transition-all cursor-default">
+                    <td className="px-5 py-4">
+                      <div className="font-bold text-[#2D3748] whitespace-nowrap">{item.nome}</div>
+                      {/*<div className="text-[10px] text-[#A0AEC0] font-mono mt-0.5">#{item.lote}</div>*/}
+                    </td>
+                    <td className="px-4 py-4 whitespace-nowrap">
+                      <div className="font-semibold text-[#4A5568]">{item.qtd} un.</div>
+                      <div className="text-[11px] text-[#718096] italic">{item.peso}kg/un</div>
+                    </td>
+                    <td className="px-4 py-4 whitespace-nowrap">
+                      <span className={`px-2.5 py-1 rounded-md text-[11px] font-bold border ${getStatusColor(item.status)}`}>
+                        {item.status?.toUpperCase()}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-[#718096] text-xs font-medium max-w-[150px] truncate" title={item.origem}>
+                      {item.origem}
+                    </td>
+                    <td className="px-4 py-4 text-xs font-medium text-[#718096] whitespace-nowrap">
+                      {item.entrada}
+                    </td>
+                      <td className="px-4 py-4 text-xs font-semibold whitespace-nowrap">
+                        <div className="flex items-center gap-2">
+                          {/* O Indicador Visual (A Bolinha) */}
+                          {checkVencimentoProximo(item.validade) && item.qtd > 0 && (
+                            <span 
+                              className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" 
+                              title="Vencimento próximo (menos de 90 dias)"
+                            />
+                          )}
+                          
+                          <span className={`
+                            ${item.status?.toLowerCase() === 'esgotado' ? 'text-gray-300' : 'text-[#4A5568]'}
+                            ${checkVencimentoProximo(item.validade) && item.qtd > 0 ? 'text-amber-700' : ''}
+                          `}>
+                            {item.validade}
+                          </span>
+                        </div>
+                      </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+=-=-=-= Funcionarios -=-=-=-=-=-
+
+import React, { useState, useEffect } from 'react';
+import { useFuncionarios } from '../../hooks/useFuncionarios';
+
+// Utilitários de Máscara (Fora do componente para evitar recriação em cada render)
+const formatCPF = (value) => {
+  if (!value) return '';
+  return value.replace(/\D/g, '')
+              .replace(/(\d{3})(\d)/, '$1.$2')
+              .replace(/(\d{3})(\d)/, '$1.$2')
+              .replace(/(\d{3})(\d{1,2})/, '$1-$2')
+              .replace(/(-\d{2})\d+?$/, '$1');
+};
+
+const formatPhone = (value) => {
+  if (!value) return '';
+  return value.replace(/\D/g, '')
+              .replace(/(\d{2})(\d)/, '($1) $2')
+              .replace(/(\d{5})(\d)/, '$1-$2')
+              .replace(/(-\d{4})\d+?$/, '$1');
+};
+
+// Utilitário de Limpeza para a API
+const unmask = (value) => value ? value.replace(/\D/g, '') : '';
+
+export default function FuncionariosIndex() {
+  const {
+    funcionarios,
+    isLoading,
+    fetchFuncionarios,
+    createFuncionario,
+    toggleStatus
+  } = useFuncionarios();
+
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [formError, setFormError] = useState('');
+
+  // 1. Corrigido para 'FUNCIONARIO'
+  const formInitialState = { nome: '', email: '', cpf: '', telefone: '', tipo: 'FUNCIONARIO', senha: '', dataAdmissao: new Date().toISOString().split('T')[0] };
+  const [formData, setFormData] = useState(formInitialState);
+
+  useEffect(() => {
+    fetchFuncionarios();
+  }, [fetchFuncionarios]);
+
+  // 2. Máscara aplicada em tempo de digitação
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    let formattedValue = value;
+
+    if (name === 'cpf') formattedValue = formatCPF(value);
+    if (name === 'telefone') formattedValue = formatPhone(value);
+
+    setFormData((prev) => ({ ...prev, [name]: formattedValue }));
+  };
+
+  const handleModalClose = () => {
+    setIsModalOpen(false);
+    setFormData(formInitialState);
+    setFormError('');
+    setShowPassword(false);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setFormError('');
+
+    // 2. Limpeza dos dados antes de enviar para o Backend (Envia puros)
+    const payload = {
+      ...formData,
+      cpf: unmask(formData.cpf),
+      telefone: unmask(formData.telefone)
+    };
+
+    const result = await createFuncionario(payload);
+    if (result.success) handleModalClose();
+    else setFormError(result.message || 'Erro ao cadastrar funcionário.');
+  };
+
+  const handleToggleStatus = (func) => {
+    const acao = func.ativo ? 'desativar' : 'ativar';
+    if (window.confirm(`Tem certeza que deseja ${acao} o funcionário ${func.nome}?`)) {
+      toggleStatus(func);
+    }
+  };
+
+const funcionariosFiltrados = funcionarios.filter((func) => {
+    // 1. Normalizamos a busca: letra minúscula e sem espaços inúteis
+    const search = searchTerm.toLowerCase().trim();
+    
+    // 2. Criamos uma versão apenas numérica para buscas de CPF/Telefone
+    const searchNumbers = search.replace(/\D/g, '');
+
+    // 3. Verificação de segurança (evitar erro se o campo vier nulo do banco)
+    const nome = func.nome?.toLowerCase() || '';
+    const email = func.email?.toLowerCase() || '';
+    const cpf = func.cpf?.replace(/\D/g, '') || ''; // Garantimos que o CPF do banco está puro
+    const telefone = func.telefone?.replace(/\D/g, '') || '';
+
+    return (
+      nome.includes(search) || 
+      email.includes(search) || 
+      (searchNumbers !== '' && cpf.includes(searchNumbers)) || // Só busca CPF se houver números na busca
+      (searchNumbers !== '' && telefone.includes(searchNumbers))
+    );
+  });
+
+  return (
+    <div className="min-h-screen bg-[#F8F9FA] text-[#2D3748] p-8 font-sans">
+      
+      {/* Header Estratégico */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Funcionários</h1>
+          <p className="text-sm text-[#718096]">Gestão de acessos e permissões da equipe.</p>
+        </div>
+        <button 
+          onClick={() => setIsModalOpen(true)}
+          className="bg-[#007F45] hover:bg-[#006838] text-white px-5 py-2.5 rounded-lg font-semibold transition-all flex items-center gap-2 shadow-sm active:transform active:scale-95"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          Cadastrar Funcionário
+        </button>
+      </div>
+
+      {/* Busca */}
+      <div className="bg-white p-4 rounded-xl shadow-sm mb-6 border border-gray-200">
+        <div className="relative max-w-md">
+          <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400">
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+          </span>
+          <input 
+            type="text" 
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Filtrar por nome, CPF ou e-mail..." 
+            className="block w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#007F45]/20 focus:border-[#007F45] outline-none transition-all"
+          />
+        </div>
+      </div>
+
+      {/* Tabela */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="bg-gray-50 border-b border-gray-200 text-[#4A5568] uppercase text-[11px] tracking-wider">
+              <th className="px-6 py-4 font-bold text-left">Nome</th>
+              {/* 3. Colunas separadas para E-mail e Telefone */}
+              <th className="px-6 py-4 font-bold text-left">E-mail</th>
+              <th className="px-6 py-4 font-bold text-left">Telefone</th>
+              <th className="px-6 py-4 font-bold text-left">CPF</th>
+              <th className="px-6 py-4 font-bold text-left">Admissão</th>
+              <th className="px-6 py-4 font-bold text-left">Cargo</th>
+              <th className="px-6 py-4 font-bold text-center">Status</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {funcionariosFiltrados.map((func) => (
+            <tr key={func.id} className={`hover:bg-gray-50/80 transition-colors ${!func.ativo ? 'bg-gray-50/50 opacity-60' : ''}`}>
+              <td className="px-6 py-4">
+                <div className={`font-bold ${func.ativo ? 'text-gray-900' : 'text-gray-500 font-normal'}`}>{func.nome}</div>
+              </td>
+              <td className="px-6 py-4 text-gray-600">{func.email || '-'}</td>
+              <td className="px-6 py-4 text-gray-600 whitespace-nowrap">{formatPhone(func.telefone) || '-'}</td>
+              
+              {/* CPF com menor contraste para reduzir poluição visual */}
+              <td className="px-6 py-4 text-left">{formatCPF(func.cpf) || '-'}</td>
+              
+              {/* Nova Coluna: Admissão */}
+              <td className="px-6 py-4 text-gray-700 font-medium">
+                {func.dataAdmissao ? new Date(func.dataAdmissao).toLocaleDateString('pt-BR') : '--/--/----'}
+              </td>
+
+              <td className="px-6 py-4">
+                <span className={`inline-flex px-2 py-1 rounded text-[11px] font-bold uppercase tracking-wide ${
+                  func.tipo === 'ADMIN' ? 'bg-purple-50 text-purple-700 border border-purple-100' : 'bg-blue-50 text-blue-700 border border-blue-100'
+                }`}>
+                  {func.tipo}
+                </span>
+              </td>
+              <td className="px-6 py-4 text-center">
+                <button 
+                  onClick={() => handleToggleStatus(func)}
+                  disabled={isLoading}
+                  className={`px-3 py-1.5 rounded-full text-[12px] font-bold transition-all border ${
+                    func.ativo 
+                      ? 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100' 
+                      : 'bg-gray-100 text-gray-600 border-gray-300 hover:bg-gray-200'
+                  }`}
+                >
+                  {func.ativo ? '● Ativo' : '○ Inativo'}
+                </button>
+              </td>
+            </tr>
+          ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Modal */}
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-[#1A202C]/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl animate-in fade-in zoom-in duration-200">
+            <div className="flex justify-between items-center p-6 border-b border-gray-100">
+              <h2 className="text-xl font-bold text-gray-800">Novo Funcionário</h2>
+              <button type="button" onClick={handleModalClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"></path></svg>
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="p-6">
+              {formError && <div className="mb-4 p-3 bg-red-50 text-red-700 border border-red-200 rounded-lg text-sm font-medium">{formError}</div>}
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="col-span-full">
+                  <label className="block text-xs font-bold uppercase text-gray-500 mb-1">Nome Completo</label>
+                  <input required name="nome" value={formData.nome} onChange={handleInputChange} className="w-full bg-gray-50 border border-gray-200 rounded-lg py-2.5 px-3 text-sm focus:ring-2 focus:ring-[#007F45]/20 outline-none" />
+                </div>
+                
+                <div>
+                  <label className="block text-xs font-bold uppercase text-gray-500 mb-1">E-mail Corporativo</label>
+                  <input required type="email" name="email" value={formData.email} onChange={handleInputChange} className="w-full bg-gray-50 border border-gray-200 rounded-lg py-2.5 px-3 text-sm focus:ring-2 focus:ring-[#007F45]/20 outline-none" />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase text-gray-500 mb-1">Telefone</label>
+                  <input required name="telefone" value={formData.telefone} onChange={handleInputChange} maxLength="15" placeholder="(00) 00000-0000" className="w-full bg-gray-50 border border-gray-200 rounded-lg py-2.5 px-3 text-sm focus:ring-2 focus:ring-[#007F45]/20 outline-none" />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase text-gray-500 mb-1">CPF</label>
+                  <input required name="cpf" value={formData.cpf} onChange={handleInputChange} maxLength="14" placeholder="000.000.000-00" className="w-full bg-gray-50 border border-gray-200 rounded-lg py-2.5 px-3 text-sm focus:ring-2 focus:ring-[#007F45]/20 outline-none" />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase text-gray-500 mb-1">Nível de Acesso</label>
+                  <select name="tipo" value={formData.tipo} onChange={handleInputChange} className="w-full bg-gray-50 border border-gray-200 rounded-lg py-2.5 px-3 text-sm outline-none">
+                    <option value="FUNCIONARIO">Funcionário (Estoque)</option>
+                    <option value="ADMIN">Administrador (Total)</option>
+                  </select>
+                </div>
+
+                <div className="col-span-full relative">
+                  <label className="block text-xs font-bold uppercase text-gray-500 mb-1">Senha Temporária</label>
+                  <input 
+                    required 
+                    type={showPassword ? "text" : "password"} 
+                    name="senha" 
+                    value={formData.senha} 
+                    onChange={handleInputChange} 
+                    className="w-full bg-gray-50 border border-gray-200 rounded-lg py-2.5 px-3 text-sm outline-none focus:ring-2 focus:ring-[#007F45]/20" 
+                  />
+                  <button 
+                    type="button" 
+                    onClick={() => setShowPassword(!showPassword)} 
+                    className="absolute right-3 top-[30px] text-[10px] font-bold text-[#007F45] hover:underline"
+                  >
+                    {showPassword ? "ESCONDER" : "MOSTRAR"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-8 flex justify-end gap-3">
+                <button type="button" onClick={handleModalClose} className="px-5 py-2.5 text-sm font-bold text-gray-500 hover:text-gray-700 transition-colors">Cancelar</button>
+                <button type="submit" disabled={isLoading} className="bg-[#007F45] hover:bg-[#006838] text-white px-8 py-2.5 rounded-lg font-bold text-sm shadow-lg shadow-[#007F45]/20 transition-all disabled:opacity-50">
+                  {isLoading ? 'Processando...' : 'Finalizar Cadastro'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+=-=-=-= Login -=-=-=-=-=-
+
+import { useState, useContext } from 'react';
+import { AuthContext } from '../../contexts/AuthContext';
+
+export default function Login() {
+  const [email, setEmail] = useState('');
+  const [senha, setSenha] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  
+  const { signIn } = useContext(AuthContext);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    
+    // UX e Prevenção de concorrência: bloqueia o botão enquanto carrega
+    setIsLoading(true);
+    
+    const result = await signIn(email, senha);
+    
+    setIsLoading(false);
+    
+    // Se falhar, mostramos o erro amigável ao usuário
+    if (!result.success) {
+      alert(result.message);
+    }
+    // Nota: Se der sucesso, não precisamos de um useNavigate aqui.
+    // O seu App.jsx automaticamente trocará as rotas porque o estado 'signed' do Context mudou[cite: 8].
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-[#f4f7f6] p-4 font-sans">
+  {/* Card Principal - Layout mais limpo e focado */}
+  <div className="flex w-full max-w-4xl bg-white rounded-2xl overflow-hidden shadow-xl border border-gray-100">
+    
+    {/* Lado Esquerdo - Identidade Visual */}
+    <div className="hidden md:flex md:w-1/2 relative bg-[#4caf50] items-center justify-center">
+      {/* Imagem como fundo para preencher o espaço mantendo a proporção */}
+      <img 
+        src="data:image/jpeg;base64,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AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEkchGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABJHIRgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASRyEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEkchGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABJHIRgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASRyEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEkchGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABJHIRgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASRyEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEkchGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABJHIRgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASRyEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEkchGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABJHIRgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASRyEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEkchGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABJHIceWayQQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAkjszOjilrhTMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABtF9P//aAAwDAQACAAMAAAAhAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACCoNGAAQpqAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAAAAAAAAAAAAAAA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AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//aAAwDAQACAAMAAAAQ+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++78lSzy++ll3+++++++++++++++++++++++++++++++++++++++++r++++++++++++++++++++++++++++++++++++++++++++++iiXOOem46tgh4++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++qlf/wDvv4v0oaGQvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvq/vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvviX/wD/APqeyJbsM+f++++++++++++++++++++++++++++++++++++++++r++++++++++++++++++++++++++++++++++++++++++++7q//AO5rxYg1WF/vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvq/vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvuC/+2qsPbSm9Pvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvq/vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvusOUHu0RIZ4tfvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvq/vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvQLcCbLmKbMUPvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvq/vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvsKanrUowHX+VzXfvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvq/vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvuuogIA+DX3/wD0lgLKLf7777777777777777777777777777777777777776v7777777777777777777777777777777777777777X9AAACd+vftrCCAABMpb777777777777777777777777777777777777776v777777777777777777777777777777777777777kgIAAAADJI7/MEAAAAADgTf7777777777777777777777777777777777776v77777777777777777777777777777777777777+EQ44YYJEkIEAoAwI4IoIYDz7777777777777777777777777777777777776v7777777777777777777777777777777777777777777777+UsEDHD3777777777777777777777777777777777777777777776v77777777777777777777777777777777777777740Bz7AF+DIMEAuUf7CT/7777777777777777777777777777777777777776v77777777777777777777777777777777777777778EI/sHwJ656KFJTq4OX7777777777777777777777777777777777777776v7777777777777777777777777777777777777776sMOIWLwpAYDg7DD1kIDX777777777777777777777777777777777777776v77777777777777777777777777777777777777770VA14Hxao7hI5YEyEIPT777777777777777777777777777777777777776v77777777777777777777777777777777777777771HQ38PwKDJH17YZik9XPX77777777777777777777777777777777777776v7777777777777777777777777777777777777775FRD+i7TzmETq6JScvxdRz77777777777777777777777777777777777776v7777777777777777777777777777777777777776M1gV1MeyweMMS/wAwzKvrf++++++++++++++++++++++++++++++++++++++r++++++++++++++++++++++++++++++++++++++++6igSLcCr0smVX+q1ehoXf++++++++++++++++++++++++++++++++++++++r++++++++++++++++++++++++++++++++++++++++v2T+CWD801MPxNhaEG3sy++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++r+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++re++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++t9++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++9/8QAOxEAAQIDBAcFBgcAAgMAAAAAAQIDAAQRBRIhMhMxQVBRcaEQImBh0QYWIFORsRQjM4HB4fBCQ1Ji8f/aAAgBAgEBPwDxGjMPEiMw8SIzDxIjMPEiMw8SIzDxIjMPEiMw8SIzDxIjMPEiMw8SIzDxIjMPEiMw8SIzDeAFdUNybq9lIbsOYXjQ/SF2DMpGU/SHJB5vWIW2pGYU7WZUqF9eAi+3W6E4RMNhtwpG6kZhu9hhTxomLO9nwAFvYff+oZlmmBRtNO1xpDoosViesFt1NWvofXZE3Z7kuu7SG2Esi85ieEKUp00g3GMVYq4QqXU4b7qqVh6XLQBBqN0ozDdzLRdVdEWPZSZdAcWMdg4f38U3Otyqar17BE/aSphd46/tCW1L7ytXGC9jo2B+8JQljE4qglTivOJijbWjJxO6UZhu72dkNIq+rUMfT4rQtZEuChvFXQRMTTkwsmtSYkrNcmFUAr9hzi07OaYaCL1VHXF5LQuNfWENFXeOAhyZCBda+sEkmp3SjMN2oTeUE8YsZkNywPH4JudalRVZx4bYn7dK03W+6Osd98+UWdYhWL7mCep9Im7TZk0aKWpht2f2YfmFvq5wUoZF5zXwh6YU6cdW60Zhu2W/VTEkKS6OQ7bQtdEuChvFXQRNTLjpvK2wyi+qhiRkGJZoTD3PHUP7i0raLlUN4J6mCVPqpFm2Kp2i14J6nlFrtht8pTqBI67sRmG7Zc0dSYs9d+WQfL7dlo2yVfls4DqeUElRxxPQc4SkuYJx8/SGJFqTQHJn9k7TziftNb6v42CMVniYs2zlvroP38hCQEig1CLWcC3yR59TuxGYbtFa4R7PzOkaLZ1jH169lq2cWFX0ZT0iXlHJhVxA/b1gqYs0UTRTnHYImZxbyiSde2G2VL1aos6wyrvuYDqfSGmUMpuIFBE+/oGFK26hEyoqcJ3YjMN2NMKdOGqLS9oGZGrUn3l7TsHr9o9n7Y07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" 
+        alt="Mesa Compartilhada Logo" 
+        className="absolute inset-0 w-full h-full object-cover opacity-90"
+      />
+      {/* Overlay sutil para garantir que a imagem não distraia demais se for muito vibrante */}
+      <div className="absolute inset-0 bg-black/5"></div>
+    </div>
+
+    {/* Lado Direito - Formulário de Alta Conversão */}
+    <div className="w-full md:w-1/2 p-10 md:p-14 flex flex-col justify-center">
+      <header className="mb-10 text-center md:text-left">
+        <h1 className="text-3xl font-bold text-gray-800 tracking-tight">Bem-vindo</h1>
+        <p className="text-gray-500 mt-2">Acesse sua conta para gerenciar as doações.</p>
+      </header>
+      
+      <form onSubmit={handleSubmit} className="space-y-5">
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-1.5">E-mail corporativo</label>
+          <input 
+            type="email" 
+            placeholder="nome@ong.org"
+            className="w-full px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 focus:border-green-600 focus:ring-2 focus:ring-green-100 outline-none transition-all text-gray-800"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            disabled={isLoading}
+          />
+        </div>
+
+        <div>
+          <div className="flex justify-between mb-1.5">
+            <label className="text-sm font-semibold text-gray-700">Sua senha</label>
+          </div>
+          <input 
+            type="password" 
+            placeholder="••••••••"
+            className="w-full px-4 py-3 rounded-lg bg-gray-50 border border-gray-200 focus:border-green-600 focus:ring-2 focus:ring-green-100 outline-none transition-all text-gray-800"
+            value={senha}
+            onChange={(e) => setSenha(e.target.value)}
+            required
+            disabled={isLoading}
+          />
+        </div>
+
+        <div className="flex items-center">
+          <input type="checkbox" id="remember" className="w-4 h-4 rounded border-gray-300 text-green-600 focus:ring-green-500 accent-green-600" />
+          <label htmlFor="remember" className="ml-2 text-sm text-gray-600 cursor-pointer select-none">
+            Manter conectado
+          </label>
+        </div>
+
+        <div className="pt-4 flex flex-col gap-3">
+          <button 
+            type="submit"
+            className="w-full py-3.5 bg-green-700 text-white font-bold rounded-lg hover:bg-green-800 shadow-md hover:shadow-lg transition-all active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center text-base"
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <span className="animate-spin rounded-full h-5 w-5 border-2 border-white/30 border-t-white"></span>
+            ) : (
+              "Entrar no Sistema"
+            )}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+  );
+}
+
+=-=-=-= Relatorios -=-=-=-=-=-
+
+import React from 'react';
+// Ajuste o caminho do import conforme a estrutura de pastas do seu projeto
+import { useRelatorios } from '../../hooks/useRelatorios'; 
+
+export default function RelatoriosDashboard() {
+  const { 
+    kpis, 
+    alertasValidade, 
+    ultimasSolicitacoes, 
+    isLoading, 
+    periodo, 
+    setPeriodo 
+  } = useRelatorios();
+
+  // Tela de carregamento enquanto busca os dados de todos os endpoints
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-[#F8F9FA] flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-[#718096] font-medium">Analisando dados do sistema...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-[#F8F9FA] text-[#2D3748] p-8 font-sans">
+      
+      {/* HEADER E CONTROLES */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+        <div>
+          <h1 className="text-2xl font-bold text-[#2D3748]">Relatórios e Visão Geral</h1>
+          <p className="text-sm text-[#718096] mt-1">Acompanhe a saúde do estoque e o fluxo de doações.</p>
+        </div>
+        
+        {/* Filtro de Período Conectado ao Hook */}
+        <div className="flex bg-white border border-gray-200 rounded-lg p-1 shadow-sm">
+          <button 
+            onClick={() => setPeriodo('MES_ATUAL')}
+            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${periodo === 'MES_ATUAL' ? 'bg-[#EDF2F7] text-[#2D3748]' : 'text-[#718096] hover:text-[#2D3748]'}`}
+          >
+            Este Mês
+          </button>
+          <button 
+            onClick={() => setPeriodo('ULTIMOS_30')}
+            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${periodo === 'ULTIMOS_30' ? 'bg-[#EDF2F7] text-[#2D3748]' : 'text-[#718096] hover:text-[#2D3748]'}`}
+          >
+            Últimos 30 dias
+          </button>
+          <button 
+            onClick={() => setPeriodo('ANO')}
+            className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${periodo === 'ANO' ? 'bg-[#EDF2F7] text-[#2D3748]' : 'text-[#718096] hover:text-[#2D3748]'}`}
+          >
+            Ano Completo
+          </button>
+        </div>
+      </div>
+
+      {/* KPI CARDS */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        
+        {/* Card 1: Solicitações Pendentes */}
+        <div className="bg-white p-5 rounded-xl border border-amber-200 shadow-sm border-l-4 border-l-amber-500 relative overflow-hidden">
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-xs font-bold text-[#718096] uppercase tracking-wider">Aguardando Saída</p>
+              <h2 className="text-3xl font-bold text-amber-600 mt-2">{kpis.solicitacoesPendentes}</h2>
+              <p className="text-sm text-amber-700 mt-1 font-medium">Solicitações Pendentes</p>
+            </div>
+            <div className="p-2 bg-amber-50 rounded-lg text-amber-500">
+              <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            </div>
+          </div>
+        </div>
+
+        {/* Card 2: Risco de Validade */}
+        <div className="bg-white p-5 rounded-xl border border-red-200 shadow-sm border-l-4 border-l-red-500 relative overflow-hidden">
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-xs font-bold text-[#718096] uppercase tracking-wider">Atenção Crítica</p>
+              <h2 className="text-3xl font-bold text-red-600 mt-2">{kpis.produtosProximosVencimento}</h2>
+              <p className="text-sm text-red-700 mt-1 font-medium">Lotes vencendo em até 3 meses</p>
+            </div>
+            <div className="p-2 bg-red-50 rounded-lg text-red-500">
+              <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+            </div>
+          </div>
+        </div>
+
+        {/* Card 3: Doações (Responsivo ao Filtro) */}
+        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-xs font-bold text-[#718096] uppercase tracking-wider">Volume de Entrada</p>
+              <h2 className="text-3xl font-bold text-[#2D3748] mt-2">{kpis.doacoesMes}</h2>
+              <p className="text-sm text-[#718096] mt-1">Doações no período</p>
+            </div>
+            <div className="p-2 bg-green-50 rounded-lg text-[#007F45]">
+              <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 10l7-7m0 0l7 7m-7-7v18"></path></svg>
+            </div>
+          </div>
+        </div>
+
+        {/* Card 4: Estoque Total */}
+        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-xs font-bold text-[#718096] uppercase tracking-wider">Estoque Atual</p>
+              <h2 className="text-3xl font-bold text-[#2D3748] mt-2">{kpis.estoqueTotalKg}</h2>
+              <p className="text-sm text-[#718096] mt-1">Kg / Litros totais</p>
+            </div>
+            <div className="p-2 bg-blue-50 rounded-lg text-blue-500">
+              <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path></svg>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      {/* ÁREA DE LISTAS ACIONÁVEIS */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        
+        {/* LISTA 1: ESTOQUE VENCENDO */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+          <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-red-50/30">
+            <h3 className="font-bold text-[#2D3748] flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-red-500"></span>
+              Lotes Próximos do Vencimento
+            </h3>
+            {/* Opcional: Aqui você pode colocar um Link do react-router-dom para a tela de Estoque */}
+            {/* <button className="text-sm text-[#007F45] font-medium hover:underline">Ver Relatório Completo</button> */}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm text-left">
+              <thead className="bg-gray-50 text-[#718096] text-xs uppercase tracking-wider border-b border-gray-100">
+                <tr>
+                  <th className="px-5 py-3 font-medium">Produto</th>
+                  <th className="px-5 py-3 font-medium">Origem</th>
+                  <th className="px-5 py-3 font-medium">Validade</th>
+                  <th className="px-5 py-3 font-medium text-right">Qtd</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {alertasValidade.length > 0 ? (
+                  alertasValidade.map((item) => (
+                    <tr key={item.id} className="hover:bg-gray-50">
+                      <td className="px-5 py-3 font-medium text-[#2D3748]">{item.produto}</td>
+                      <td className="px-5 py-3 text-[#718096] font-mono text-xs">{item.lote}</td>
+                      <td className="px-5 py-3 font-semibold text-red-600">{item.validade}</td>
+                      <td className="px-5 py-3 text-right font-mono">{item.quantidade}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan="4" className="px-5 py-8 text-center text-[#718096]">
+                      Nenhum produto próximo do vencimento (3 meses).
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* LISTA 2: SOLICITAÇÕES RECENTES */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+          <div className="p-5 border-b border-gray-100 flex justify-between items-center">
+            <h3 className="font-bold text-[#2D3748]">Últimas Solicitações</h3>
+            {/* Opcional: Aqui você pode colocar um Link do react-router-dom para a tela de Saídas */}
+            {/* <button className="text-sm text-[#007F45] font-medium hover:underline">Ir para Saídas</button> */}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm text-left">
+              <thead className="bg-gray-50 text-[#718096] text-xs uppercase tracking-wider border-b border-gray-100">
+                <tr>
+                  <th className="px-5 py-3 font-medium">ID</th>
+                  <th className="px-5 py-3 font-medium">Solicitante</th>
+                  <th className="px-5 py-3 font-medium">Data</th>
+                  <th className="px-5 py-3 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {ultimasSolicitacoes.length > 0 ? (
+                  ultimasSolicitacoes.map((item) => (
+                    <tr key={item.id} className="hover:bg-gray-50">
+                      <td className="px-5 py-3 font-mono text-xs text-[#718096]">{item.id}</td>
+                      <td className="px-5 py-3 font-medium text-[#2D3748]">{item.solicitante}</td>
+                      <td className="px-5 py-3 text-[#718096]">{item.data}</td>
+                      <td className="px-5 py-3">
+                        <span className={`px-2 py-1 text-xs font-semibold rounded-md ${
+                          item.status === 'PENDENTE' ? 'bg-amber-100 text-amber-800' : 
+                          item.status === 'CANCELADO' ? 'bg-red-100 text-red-800' : 
+                          'bg-emerald-100 text-emerald-800'
+                        }`}>
+                          {item.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan="4" className="px-5 py-8 text-center text-[#718096]">
+                      Nenhuma solicitação encontrada.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+=-=-=-= Solicitacao -=-=-=-=-=-
+
+import React, { useState, useEffect } from 'react';
+import { useSolicitacao } from '../../hooks/useSolicitacao';
+import { useSolicitantes } from '../../hooks/useSolicitantes';
+import { useProdutos } from '../../hooks/useProdutos';
+
+export default function SaidaSolicitacoes() {
+  // Hooks de Dados
+  const { solicitacoes, loading: loadingSol, fetchSolicitacoes, criarSolicitacao, atualizarStatus } = useSolicitacao();
+  const { solicitantes, fetchSolicitantes } = useSolicitantes();
+  const { produtos, fetchProdutos } = useProdutos();
+
+  // Estados do Modal e UI
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [linhaExpandida, setLinhaExpandida] = useState(null);
+  const [filtro, setFiltro] = useState('');
+
+  // Estados do Formulário (Cadastro)
+  const [solicitanteId, setSolicitanteId] = useState('');
+  const [enderecoManual, setEnderecoManual] = useState(''); // Visual apenas
+  const [dataPrevisao, setDataPrevisao] = useState('');
+  const [observacao, setObservacao] = useState('');
+  
+  const [itensCarrinho, setItensCarrinho] = useState([]);
+  const [produtoIdAtual, setProdutoIdAtual] = useState('');
+  const [qtdAtual, setQtdAtual] = useState('');
+
+  // Carregamento Inicial
+  useEffect(() => {
+    fetchSolicitacoes();
+    fetchSolicitantes();
+    fetchProdutos();
+  }, [fetchSolicitacoes, fetchSolicitantes, fetchProdutos]);
+
+  // Lógica de Seleção de Solicitante (para pegar o endereço)
+  const handleSolicitanteChange = (id) => {
+    setSolicitanteId(id);
+    const solicitanteEncontrado = solicitantes.find(s => s.id === parseInt(id));
+    setEnderecoManual(solicitanteEncontrado?.enderecoEntrega || 'Endereço não cadastrado');
+  };
+
+  const adicionarProduto = (e) => {
+    e.preventDefault();
+    if (!produtoIdAtual || !qtdAtual) return;
+
+    const produtoInfo = produtos.find(p => p.id === parseInt(produtoIdAtual));
+    
+    const novoItem = {
+      produtoId: parseInt(produtoIdAtual),
+      nome: produtoInfo?.nome || 'Produto',
+      quantidade: parseFloat(qtdAtual)
+    };
+
+    setItensCarrinho([...itensCarrinho, novoItem]);
+    setProdutoIdAtual('');
+    setQtdAtual('');
+  };
+
+  const handleRegistrarSolicitacao = async () => {
+    // Formata a observação para esconder a data de previsão
+    const obsFormatada = `[PREVISÃO: ${dataPrevisao}] ${observacao}`.trim();
+
+    const dto = {
+      solicitanteId: parseInt(solicitanteId),
+      observacao: obsFormatada,
+      itens: itensCarrinho.map(item => ({
+        produtoId: item.produtoId,
+        quantidade: item.quantidade
+      }))
+    };
+
+    const resultado = await criarSolicitacao(dto);
+    if (resultado.sucesso) {
+      setIsModalOpen(false);
+      resetForm();
+      alert("Solicitação registrada com sucesso!");
+    } else {
+      alert("Erro: " + resultado.erro);
+    }
+  };
+
+  const resetForm = () => {
+    setSolicitanteId('');
+    setEnderecoManual('');
+    setDataPrevisao('');
+    setObservacao('');
+    setItensCarrinho([]);
+  };
+
+  const renderStatusBadge = (status) => {
+    const statusConfig = {
+      'PENDENTE': 'bg-amber-50 text-amber-700 border-amber-200',
+      'ENTREGUE': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      'CANCELADO': 'bg-red-50 text-red-700 border-red-200'
+    };
+    return (
+      <span className={`px-2.5 py-1 rounded-full text-xs font-semibold border ${statusConfig[status] || 'bg-gray-50'}`}>
+        {status}
+      </span>
+    );
+  };
+
+  // Filtro de busca simples
+  const solicitacoesFiltradas = solicitacoes.filter(s => 
+    s.nomeSolicitante.toLowerCase().includes(filtro.toLowerCase()) || 
+    s.id.toString().includes(filtro)
+  );
+
+  return (
+<div className="min-h-screen bg-[#F8F9FA] text-[#2D3748] p-6 md:p-8 font-sans">
+  
+  {/* HEADER */}
+  <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+    <div>
+      <h1 className="text-2xl font-bold text-gray-800">Saída de Solicitações</h1>
+      <p className="text-sm text-gray-500 mt-1">Controle de entregas e baixas de estoque corporativo.</p>
+    </div>
+    <button 
+      onClick={() => setIsModalOpen(true)}
+      className="bg-[#007F45] hover:bg-[#006838] text-white px-5 py-2.5 rounded-lg font-medium transition-all duration-200 flex items-center gap-2 shadow-sm hover:shadow-md"
+    >
+      <span className="text-lg leading-none">+</span> Nova Solicitação
+    </button>
+  </div>
+
+  {/* BARRA DE PESQUISA */}
+  <div className="bg-white p-4 rounded-xl shadow-sm mb-6 border border-gray-200 flex items-center">
+    <div className="relative w-full max-w-md">
+      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+        <svg 
+  className="h-4 w-4 text-gray-400" 
+  fill="none" 
+  viewBox="0 0 24 24" 
+  stroke="currentColor"
+>
+  <path 
+    strokeLinecap="round" 
+    strokeLinejoin="round" 
+    strokeWidth={2} 
+    d="m21 21-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z" 
+  />
+</svg>
+      </div>
+      <input 
+        type="text" 
+        placeholder="Buscar por ID ou Solicitante..." 
+        className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#007F45] focus:border-[#007F45] transition-all outline-none"
+        value={filtro}
+        onChange={(e) => setFiltro(e.target.value)}
+      />
+    </div>
+  </div>
+
+  {/* TABELA DE HISTÓRICO */}
+  <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm text-left whitespace-nowrap">
+        <thead className="bg-gray-50/80 text-gray-600 border-b border-gray-200">
+          <tr>
+            <th className="px-6 py-4 font-semibold">ID</th>
+            <th className="px-6 py-4 font-semibold">Data</th>
+            <th className="px-6 py-4 font-semibold">Solicitante</th>
+            <th className="px-6 py-4 font-semibold">Itens</th>
+            <th className="px-6 py-4 font-semibold">Status</th>
+            <th className="px-6 py-4 font-semibold text-center">Ações</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {solicitacoesFiltradas.map((item) => (
+            <React.Fragment key={item.id}>
+              <tr className="hover:bg-gray-50/50 transition-colors group">
+                <td className="px-6 py-4 font-mono text-xs text-gray-500">#{item.id}</td>
+                <td className="px-6 py-4 text-gray-600">{new Date(item.dataSolicitacao).toLocaleDateString()}</td>
+                <td className="px-6 py-4 font-medium text-gray-800">{item.nomeSolicitante}</td>
+                <td className="px-6 py-4">
+                  <button 
+                    onClick={() => setLinhaExpandida(linhaExpandida === item.id ? null : item.id)}
+                    className="text-[#007F45] font-medium text-xs border border-[#007F45]/30 hover:bg-[#007F45]/10 px-3 py-1.5 rounded-full transition-colors flex items-center gap-1"
+                  >
+                    {item.itens.length} iten(s)
+                    <span className="text-[10px]">{linhaExpandida === item.id ? '▲' : '▼'}</span>
+                  </button>
+                </td>
+                <td className="px-6 py-4">{renderStatusBadge(item.status)}</td>
+                <td className="px-6 py-4">
+                  {item.status === 'PENDENTE' && (
+                  <div className="flex justify-center gap-2">
+                    <button 
+                      onClick={() => atualizarStatus(item.id, 'ENTREGUE')}
+                      className="text-emerald-600 hover:bg-emerald-50 px-2 py-1 rounded text-xs font-medium border border-emerald-100 transition-all" 
+                    >
+                      Confirmar
+                    </button>
+                    <button 
+                      onClick={() => atualizarStatus(item.id, 'CANCELADO')}
+                      className="text-red-600 hover:bg-red-50 px-2 py-1 rounded text-xs font-medium border border-red-100 transition-all" 
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                  )}
+                </td>
+              </tr>
+              
+              {/* DETALHES EXPANSÍVEIS */}
+              {linhaExpandida === item.id && (
+                <tr className="bg-gray-50/80 border-b border-gray-200 shadow-inner">
+                  <td colSpan="6" className="p-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+                        <h4 className="text-xs font-bold text-gray-500 uppercase mb-3 flex items-center gap-2">
+                          <span className="w-1.5 h-1.5 bg-[#007F45] rounded-full"></span>
+                          Produtos Solicitados
+                        </h4>
+                        <div className="divide-y divide-gray-100">
+                          {item.itens.map(prod => (
+                            <div key={prod.id} className="flex justify-between items-center text-sm py-2">
+                              <span className="text-gray-700">{prod.nomeProduto}</span>
+                              <span className="font-mono font-semibold bg-[#007F45]/10 text-[#007F45] px-2 py-0.5 rounded text-xs">
+                                {prod.quantidade} un
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+                        <h4 className="text-xs font-bold text-gray-500 uppercase mb-3">Detalhes Adicionais</h4>
+                        <div className="text-sm space-y-3">
+                          <p className="text-gray-600">
+                            <strong className="text-gray-800 block mb-1">Observações:</strong> 
+                            {item.observacao || <span className="text-gray-400 italic">Nenhuma observação registrada.</span>}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </React.Fragment>
+          ))}
+        </tbody>
+      </table>
+      {solicitacoesFiltradas.length === 0 && (
+        <div className="p-8 text-center text-gray-500">
+          Nenhuma solicitação encontrada para esta busca.
+        </div>
+      )}
+    </div>
+  </div>
+
+  {/* MODAL DE CADASTRO */}
+  {isModalOpen && (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-opacity">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+        
+        <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-white z-10">
+          <h2 className="text-lg font-bold text-gray-800">Nova Solicitação de Saída</h2>
+          <button 
+            onClick={() => setIsModalOpen(false)} 
+            className="text-gray-400 hover:text-gray-700 hover:bg-gray-100 w-8 h-8 rounded-full flex items-center justify-center transition-colors"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="p-6 space-y-8 overflow-y-auto bg-gray-50/50 flex-1">
+          {/* SEÇÃO 1: DESTINO */}
+          <section className="space-y-4">
+            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
+              <span className="bg-[#007F45] text-white w-5 h-5 rounded-full flex items-center justify-center text-[10px]">1</span>
+              Dados do Destino
+            </h3>
+            <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div className="col-span-1 md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Solicitante</label>
+                <select 
+                  className="w-full border border-gray-300 rounded-lg py-2.5 px-3 text-sm focus:ring-2 focus:ring-[#007F45] focus:border-[#007F45] outline-none transition-all"
+                  value={solicitanteId}
+                  onChange={(e) => handleSolicitanteChange(e.target.value)}
+                >
+                  <option value="">Selecione um solicitante...</option>
+                  {solicitantes.map(s => <option key={s.id} value={s.id}>{s.nome}</option>)}
+                </select>
+              </div>
+              <div className="col-span-1 md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Endereço de Entrega <span className="text-gray-400 font-normal">(Automático)</span></label>
+                <input 
+                  type="text" 
+                  readOnly 
+                  value={enderecoManual} 
+                  placeholder="Selecione um solicitante para preencher..."
+                  className="w-full bg-gray-50 border border-gray-200 rounded-lg py-2.5 px-3 text-sm text-gray-600 cursor-not-allowed" 
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Previsão de Entrega</label>
+                <input 
+                  type="date" 
+                  value={dataPrevisao} 
+                  onChange={(e) => setDataPrevisao(e.target.value)} 
+                  className="w-full border border-gray-300 rounded-lg py-2.5 px-3 text-sm focus:ring-2 focus:ring-[#007F45] focus:border-[#007F45] outline-none transition-all" 
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Observação</label>
+                <input 
+                  type="text" 
+                  value={observacao} 
+                  onChange={(e) => setObservacao(e.target.value)} 
+                  className="w-full border border-gray-300 rounded-lg py-2.5 px-3 text-sm focus:ring-2 focus:ring-[#007F45] focus:border-[#007F45] outline-none transition-all" 
+                  placeholder="Ex: Entregar na portaria" 
+                />
+              </div>
+            </div>
+          </section>
+
+          {/* SEÇÃO 2: ITENS */}
+          <section className="space-y-4">
+            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
+              <span className="bg-[#007F45] text-white w-5 h-5 rounded-full flex items-center justify-center text-[10px]">2</span>
+              Adicionar Produtos
+            </h3>
+            <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-5">
+              <form onSubmit={adicionarProduto} className="flex flex-col sm:flex-row gap-3">
+                <select 
+                  className="flex-1 border border-gray-300 rounded-lg py-2.5 px-3 text-sm focus:ring-2 focus:ring-[#007F45] focus:border-[#007F45] outline-none transition-all"
+                  value={produtoIdAtual}
+                  onChange={(e) => setProdutoIdAtual(e.target.value)}
+                >
+                  <option value="">Selecione o produto...</option>
+                  {produtos.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
+                </select>
+                <div className="flex gap-3">
+                  <input 
+                    type="number" 
+                    step="0.01" 
+                    placeholder="Qtd" 
+                    className="w-24 border border-gray-300 rounded-lg py-2.5 px-3 text-sm focus:ring-2 focus:ring-[#007F45] focus:border-[#007F45] outline-none transition-all"
+                    value={qtdAtual}
+                    onChange={(e) => setQtdAtual(e.target.value)}
+                  />
+                  <button 
+                    type="submit" 
+                    className="bg-[#007F45]/10 hover:bg-[#007F45]/20 text-[#007F45] px-5 py-2.5 rounded-lg text-sm font-bold transition-colors"
+                  >
+                    Add
+                  </button>
+                </div>
+              </form>
+
+              <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 overflow-hidden">
+                {itensCarrinho.length === 0 ? (
+                  <div className="p-6 text-center flex flex-col items-center justify-center text-gray-400">
+                    <span className="text-2xl mb-2">📦</span>
+                    <p className="text-sm">Nenhum produto adicionado à solicitação.</p>
+                  </div>
+                ) : (
+                  itensCarrinho.map((item, index) => (
+                    <div key={index} className="p-3 bg-gray-50/30 flex justify-between items-center text-sm hover:bg-gray-50 transition-colors">
+                      <span className="font-medium text-gray-700">{item.nome}</span>
+                      <div className="flex items-center gap-4">
+                        <span className="font-mono font-bold bg-white border border-gray-200 px-2 py-1 rounded text-[#007F45]">
+                          {item.quantidade}
+                        </span>
+                        <button 
+                          onClick={() => setItensCarrinho(itensCarrinho.filter((_, i) => i !== index))} 
+                          className="text-red-400 hover:text-red-600 hover:bg-red-50 w-7 h-7 rounded flex items-center justify-center transition-colors"
+                          title="Remover item"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div className="p-5 border-t border-gray-100 flex justify-end gap-3 bg-gray-50 z-10 rounded-b-2xl">
+          <button 
+            onClick={() => setIsModalOpen(false)} 
+            className="px-5 py-2.5 text-gray-600 hover:bg-gray-200 rounded-lg font-medium text-sm transition-colors"
+          >
+            Cancelar
+          </button>
+          <button 
+            onClick={handleRegistrarSolicitacao}
+            disabled={itensCarrinho.length === 0 || !solicitanteId}
+            className="bg-[#007F45] hover:bg-[#006838] text-white px-6 py-2.5 rounded-lg font-semibold text-sm transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Registrar Solicitação
+          </button>
+        </div>
+      </div>
+    </div>
+  )}
+</div>
+  );
+}
+
+=-=-=-= Solicitante -=-=-=-=-=-
+
+import React, { useState, useEffect } from 'react';
+import { useSolicitantes } from '../../hooks/useSolicitantes';
+
+export default function SolicitantesIndex() {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const { solicitantes, loading, fetchSolicitantes, createSolicitante } = useSolicitantes();
+
+  const [formData, setFormData] = useState({
+    nome: '', 
+    email: '', 
+    cpf: '', 
+    telefone: '', 
+    enderecoEntrega: ''
+  });
+
+  const formatCPF = (value) => {
+    if (!value) return "";
+    return value
+      .replace(/\D/g, '')
+      .replace(/(\d{3})(\d)/, '$1.$2')
+      .replace(/(\d{3})(\d)/, '$1.$2')
+      .replace(/(\d{3})(\d{1,2})/, '$1-$2')
+      .replace(/(-\d{2})\d+?$/, '$1');
+  };
+
+  const formatTelefone = (value) => {
+    if (!value) return "";
+    return value
+      .replace(/\D/g, '')
+      .replace(/(\d{2})(\d)/, '($1) $2')
+      .replace(/(\d{5})(\d)/, '$1-$2')
+      .replace(/(-\d{4})\d+?$/, '$1');
+  };
+
+  const stripMask = (value) => value.replace(/\D/g, '');
+
+  useEffect(() => {
+    const delayDebounce = setTimeout(() => {
+      fetchSolicitantes(searchTerm);
+    }, 500);
+    return () => clearTimeout(delayDebounce);
+  }, [searchTerm, fetchSolicitantes]);
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    let formattedValue = value;
+
+    if (name === 'cpf') formattedValue = formatCPF(value);
+    if (name === 'telefone') formattedValue = formatTelefone(value);
+
+    setFormData(prev => ({ ...prev, [name]: formattedValue }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    const dataToSubmit = {
+      ...formData,
+      cpf: stripMask(formData.cpf),
+      telefone: stripMask(formData.telefone)
+    };
+
+    const result = await createSolicitante(dataToSubmit);
+    
+    if (result.success) {
+      setIsModalOpen(false);
+      setFormData({ nome: '', email: '', cpf: '', telefone: '', enderecoEntrega: '' });
+      fetchSolicitantes();
+    } else {
+      alert(result.error);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#F8F9FA] text-[#2D3748] p-8 font-sans">
+      
+      {/* Header Estratégico */}
+      <div className="flex justify-between items-center mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-[#2D3748]">Solicitantes</h1>
+          <p className="text-sm text-[#718096] mt-1">Gestão de beneficiários e controle de entrega de donativos.</p>
+        </div>
+        <button
+          onClick={() => setIsModalOpen(true)}
+          className="bg-[#007F45] hover:bg-[#006838] text-white px-4 py-2 rounded-md font-medium transition-all flex items-center gap-2 text-sm shadow-sm"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          Novo Solicitante
+        </button>
+      </div>
+
+      {/* Barra de Busca */}
+      <div className="bg-white p-4 rounded-lg shadow-sm mb-6 border border-gray-100">
+        <div className="relative w-full max-w-md">
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <svg className="h-4 w-4 text-[#718096]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+          </div>
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Buscar por nome ou CPF..."
+            className="block w-full pl-10 pr-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#007F45] focus:border-[#007F45] transition-all"
+          />
+        </div>
+      </div>
+
+      {/* Tabela de Dados - Layout Corrigido */}
+      <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-x-auto">
+        <table className="w-full text-sm table-fixed">
+          <thead className="bg-gray-50 border-b border-gray-100 text-[#718096]">
+            <tr>
+              <th className="px-6 py-4 font-semibold text-left w-3/12">Nome</th>
+              <th className="px-6 py-4 font-semibold text-left w-3/12">E-mail</th>
+              <th className="px-6 py-4 font-semibold text-left w-2/12">Telefone</th>
+              <th className="px-6 py-4 font-semibold text-left w-2/12">CPF</th>
+              <th className="px-6 py-4 font-semibold text-left w-4/12">Endereço de Entrega</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100 text-[#2D3748]">
+            {loading ? (
+              <tr><td colSpan="5" className="text-center py-10 animate-pulse">Carregando dados...</td></tr>
+            ) : solicitantes.map((s) => (
+              <tr key={s.id} className="hover:bg-gray-50 transition-colors">
+                <td className="px-6 py-4 font-bold text-left" title={s.nome}>
+                  {s.nome}  
+                </td>
+                <td className="px-6 py-4 text-left" title={s.email}>
+                  {s.email || '-'}
+                </td>
+                <td className="px-6 py-4 text-left">
+                  {formatTelefone(s.telefone)}
+                </td>
+                <td className="px-6 py-4 text-left">
+                  {formatCPF(s.cpf)}
+                </td>
+                <td className="px-6 py-4 text-left text-[#718096] whitespace-nowrap" title={s.enderecoEntrega}>
+                  {s.enderecoEntrega}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Modal de Cadastro */}
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-[#1A202C]/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-[700px] overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="flex justify-between items-center p-6 border-b border-gray-100 bg-white">
+              <h2 className="text-xl font-bold text-[#2D3748]">Cadastrar Novo Solicitante</h2>
+              <button onClick={() => setIsModalOpen(false)} className="text-[#718096] hover:text-red-500 transition-colors">
+                <svg width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 18L18 6M6 6l12 12"></path></svg>
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit}>
+              <div className="p-8">
+                <div className="grid grid-cols-12 gap-5">
+                  <div className="col-span-12">
+                    <label className="block text-xs font-bold uppercase tracking-wider mb-2 text-[#4A5568]">Nome Completo</label>
+                    <input name="nome" value={formData.nome} onChange={handleInputChange} required type="text" placeholder="Nome do beneficiário" className="w-full border border-gray-300 rounded-md py-2.5 px-4 text-sm focus:ring-2 focus:ring-[#007F45]/20 focus:border-[#007F45] focus:outline-none transition-all" />
+                  </div>
+
+                  <div className="col-span-12 md:col-span-6">
+                    <label className="block text-xs font-bold uppercase tracking-wider mb-2 text-[#4A5568]">E-mail (Opcional)</label>
+                    <input name="email" value={formData.email} onChange={handleInputChange} type="email" placeholder="contato@exemplo.com" className="w-full border border-gray-300 rounded-md py-2.5 px-4 text-sm focus:ring-2 focus:ring-[#007F45]/20 focus:outline-none transition-all" />
+                  </div>
+                  
+                  <div className="col-span-12 md:col-span-6">
+                    <label className="block text-xs font-bold uppercase tracking-wider mb-2 text-[#4A5568]">CPF</label>
+                    <input name="cpf" value={formData.cpf} onChange={handleInputChange} required type="text" className="w-full border border-gray-300 rounded-md py-2.5 px-4 text-sm focus:ring-2 focus:ring-[#007F45]/20 focus:outline-none transition-all" placeholder="000.000.000-00" maxLength="14" />
+                  </div>
+
+                  <div className="col-span-12 md:col-span-4">
+                    <label className="block text-xs font-bold uppercase tracking-wider mb-2 text-[#4A5568]">Telefone</label>
+                    <input name="telefone" value={formData.telefone} onChange={handleInputChange} required type="text" className="w-full border border-gray-300 rounded-md py-2.5 px-4 text-sm focus:ring-2 focus:ring-[#007F45]/20 focus:outline-none transition-all" placeholder="(00) 00000-0000" maxLength="15" />
+                  </div>
+
+                  <div className="col-span-12 md:col-span-8">
+                    <label className="block text-xs font-bold uppercase tracking-wider mb-2 text-[#4A5568]">Endereço Completo de Entrega</label>
+                    <input name="enderecoEntrega" value={formData.enderecoEntrega} onChange={handleInputChange} required type="text" placeholder="Rua, Numero - Bairro, Cidade - UF" className="w-full border border-gray-300 rounded-md py-2.5 px-4 text-sm focus:ring-2 focus:ring-[#007F45]/20 focus:outline-none transition-all" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-6 border-t border-gray-100 flex justify-end gap-4 bg-gray-50">
+                <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-sm font-semibold text-[#718096] hover:text-[#2D3748] transition-colors">Descartar</button>
+                <button type="submit" className="bg-[#007F45] hover:bg-[#006838] text-white px-8 py-2.5 rounded-md font-bold text-sm shadow-md hover:shadow-lg transition-all active:scale-95">
+                  Confirmar Cadastro
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

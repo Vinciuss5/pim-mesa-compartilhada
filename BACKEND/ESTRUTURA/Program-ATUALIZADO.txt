@@ -1,0 +1,124 @@
+---- Program.cs ----
+
+using EstoqueAPI.Data;
+using EstoqueAPI.Mappings;
+using EstoqueAPI.Services;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
+
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = AppContext.BaseDirectory,  // ← força ler o appsettings.json do mesmo lugar do .exe
+    WebRootPath = Path.Combine(AppContext.BaseDirectory, "wwwroot")
+});
+
+builder.WebHost.UseUrls("http://localhost:5235");
+// --- 1. CONFIGURAÇÃO DE BANCO E MAPPINGS ---
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseSqlite(connectionString));
+
+builder.Services.AddAutoMapper(cfg => { }, typeof(MappingProfile));
+
+// --- CORS: permite tanto o Vite (dev) quanto o proprio servidor (produção) ---
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowFrontendApp", policy =>
+    {
+        policy.WithOrigins(
+                "http://localhost:5173",  // Vite em desenvolvimento
+                "http://localhost:5235"   // API servindo o React em produção
+              )
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
+});
+
+// --- 2. REGISTRO DE SERVIÇOS (DI) ---
+builder.Services.AddScoped<IProdutoService, ProdutoService>();
+builder.Services.AddScoped<IDoadorService, DoadorService>();
+builder.Services.AddScoped<ISolicitanteService, SolicitanteService>();
+builder.Services.AddScoped<IDoacaoService, DoacaoService>();
+builder.Services.AddScoped<ISolicitacaoService, SolicitacaoService>();
+builder.Services.AddScoped<IUsuarioService, UsuarioService>();
+builder.Services.AddScoped<IEstoqueService, EstoqueService>();
+
+// --- 3. CONFIGURAÇÃO DE AUTENTICAÇÃO JWT ---
+var jwtKey = builder.Configuration["Jwt:Key"] ?? "ChaveSuperSecretaDePeloMenos32Caracteres";
+var key = Encoding.ASCII.GetBytes(jwtKey);
+builder.Services.AddAuthentication(x =>
+{
+    x.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    x.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+})
+.AddJwtBearer(x =>
+{
+    x.RequireHttpsMetadata = false;
+    x.SaveToken = true;
+    x.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuerSigningKey = true,
+        IssuerSigningKey = new SymmetricSecurityKey(key),
+        ValidateIssuer = false,
+        ValidateAudience = false,
+        ValidateLifetime = true
+    };
+});
+
+// --- 4. CONFIGURAÇÃO MINIMALISTA ---
+builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+var app = builder.Build();
+
+// Aplica migrations pendentes automaticamente (cria o banco se não existir)
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    db.Database.Migrate();
+}
+
+// --- 5. PIPELINE DE MIDDLEWARE ---
+
+// CORS sempre primeiro
+app.UseCors("AllowFrontendApp");
+
+// Swagger só em desenvolvimento
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
+// Arquivos estáticos do React (wwwroot)
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
+
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.MapControllers();
+
+// Fallback para o React Router funcionar
+app.Use(async (context, next) =>
+{
+    await next();
+
+    if (context.Response.StatusCode == 404
+        && !context.Request.Path.StartsWithSegments("/api")
+        && !Path.HasExtension(context.Request.Path))
+    {
+        context.Response.StatusCode = 200;
+        await context.Response.SendFileAsync(
+            Path.Combine(context.RequestServices
+                .GetRequiredService<IWebHostEnvironment>().WebRootPath,
+                "index.html"));
+    }
+});
+
+app.Run();

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Tema base. A cor real é aplicada no tema Compose (Color.kt / Theme.kt). -->
+    <style name="Theme.MesaCompartilhada" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@color/verde_escuro</item>
+        <item name="android:windowBackground">@color/fundo_app</item>
+    </style>
+</resources>

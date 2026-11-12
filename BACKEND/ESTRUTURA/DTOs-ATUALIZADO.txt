@@ -1,0 +1,377 @@
+---- DoacaoDTO ----
+
+using System.ComponentModel.DataAnnotations;
+
+namespace EstoqueAPI.DTOs
+{
+    // DTO para Criar uma Doação: O que o Frontend envia (POST)
+    public record DoacaoCreateDTO(
+        [Required(ErrorMessage = "O doador deve ser identificado.")]
+        int? DoadorId,
+
+        [Required(ErrorMessage = "A data da doação é obrigatória.")]
+        DateTime? Data,
+
+        [Required]
+        [MinLength(1, ErrorMessage = "A doação deve conter pelo menos um item.")]
+        List<DoacaoItemCreateDTO> Itens
+    );
+
+    // DTO para os itens na criação
+    public record DoacaoItemCreateDTO(
+        [Required(ErrorMessage = "O produto deve ser informado.")]
+        int? ProdutoId,
+
+        [Required]
+        // CORREÇÃO: Alterado para decimal para suportar Kg/Litros e sincronizar com a Model
+        [Range(0.01, 9999999.99, ErrorMessage = "A quantidade deve ser maior que zero.")]
+        decimal Quantidade,
+
+        DateTime? DataValidade
+    );
+
+    // DTO para Resposta: O que o Frontend consome (GET)
+    public record DoacaoResponseDTO(
+        int Id,
+        int DoadorId,
+        string NomeDoador,
+        DateTime Data,
+        List<DoacaoItemResponseDTO> Itens
+    );
+
+    public record DoacaoItemResponseDTO(
+        int Id,
+        int ProdutoId,
+        string NomeProduto,
+        // CORREÇÃO: Alterado para decimal para manter a precisão do estoque
+        decimal Quantidade,
+        DateTime? DataValidade
+    );
+}
+
+
+---- DoadorDTO ----
+
+using System.ComponentModel.DataAnnotations;
+
+namespace EstoqueAPI.DTOs
+{
+    // DTO para Cadastro/Criação de um novo Doador
+    public record DoadorCreateDTO(
+        [Required(ErrorMessage = "O nome do doador é obrigatório.")]
+        [StringLength(80, ErrorMessage = "O nome não pode exceder 80 caracteres.")]
+        string Nome,
+
+        [EmailAddress(ErrorMessage = "E-mail em formato inválido.")]
+        [StringLength(120)]
+        string? Email,
+
+        [StringLength(20)]
+        string? Telefone,
+
+        [StringLength(11, MinimumLength = 11, ErrorMessage = "O CPF deve ter exatamente 11 dígitos.")]
+        [RegularExpression(@"^\d+$", ErrorMessage = "O CPF deve conter apenas números.")]
+        string? CPF,
+
+        [StringLength(150)]
+        string? Endereco
+    );
+
+    // DTO para Resposta (Exibição em listas ou detalhes)
+    public record DoadorResponseDTO(
+        int Id,
+        string Nome,
+        string? Email,
+        string? Telefone,
+        string? CPF,
+        string? Endereco
+    );
+
+    // DTO para Atualização (Permite alterar dados mantendo o ID intacto no parâmetro da URL)
+    public record DoadorUpdateDTO(
+        [Required(ErrorMessage = "O nome é obrigatório.")]
+        [StringLength(80)]
+        string Nome,
+
+        [EmailAddress]
+        string? Email,
+
+        string? Telefone,
+        string? Endereco
+    );
+}
+
+---- EstoqueDTO ----
+
+namespace EstoqueAPI.DTOs
+{
+    /// <summary>
+    /// DTO de Resposta Completa: Utilizado em listagens e detalhes de estoque.
+    /// </summary>
+    public record EstoqueResponseDTO(
+        int Id,
+        int ProdutoId,
+        string ProdutoNome,
+        decimal Quantidade, // CORREÇÃO: Alterado de int para decimal
+        string Status,
+        decimal Peso,       // Mantido como decimal para precisão de KG
+        string Origem,
+        DateTime? Validade,
+        string? LoteCodigo,
+        DateTime DataEntrada
+    );
+
+    /// <summary>
+    /// DTO Simplificado: Utilizado para consultas rápidas ou componentes leves de UI.
+    /// </summary>
+    public record EstoqueSimplesDTO(
+        int ProdutoId,
+        decimal Quantidade // CORREÇÃO: Alterado de int para decimal
+    );
+}
+
+---- ProdutoDTO ----
+
+using System.ComponentModel.DataAnnotations;
+
+namespace EstoqueAPI.DTOs
+{
+    // DTO para Criação: O que recebemos do formulário/cliente
+    public record ProdutoCreateDTO(
+        [Required(ErrorMessage = "O nome do produto é obrigatório.")]
+        [StringLength(80, ErrorMessage = "O nome não pode exceder 80 caracteres.")]
+        string Nome,
+
+        [Range(0, 9999.99, ErrorMessage = "O peso deve ser um valor positivo.")]
+        decimal? PesoKg
+    );
+
+    // DTO para Resposta: O que devolvemos para o cliente (inclui o ID)
+    public record ProdutoResponseDTO(
+        int Id,
+        string Nome,
+        decimal? PesoKg
+    );
+
+    // DTO para Atualização: Útil para manter a semântica de alteração
+    public record ProdutoUpdateDTO(
+        [Required(ErrorMessage = "O nome do produto é obrigatório.")]
+        [StringLength(80)]
+        string Nome,
+
+        decimal? PesoKg
+    );
+}
+
+---- SolicitacaoDTO ----
+
+using System.ComponentModel.DataAnnotations;
+
+namespace EstoqueAPI.DTOs
+{
+    /// <summary>
+    /// DTO para Criação: O que o Frontend envia (POST).
+    /// </summary>
+    public record SolicitacaoCreateDTO(
+        [Required(ErrorMessage = "O solicitante é obrigatório.")]
+        int SolicitanteId,
+
+        [MinLength(1, ErrorMessage = "A solicitação deve ter pelo menos um item.")]
+        List<SolicitacaoItemCreateDTO> Itens,
+
+        [StringLength(255)]
+        string? Observacao
+    );
+
+    /// <summary>
+    /// Item da solicitação na criação.
+    /// Alterado Quantidade para 'decimal' para suportar Kg/Litros.
+    /// </summary>
+    public record SolicitacaoItemCreateDTO(
+        [Required]
+        int ProdutoId,
+
+        [Required]
+        [Range(0.01, 999999.99, ErrorMessage = "A quantidade deve ser maior que zero.")]
+        decimal Quantidade
+    );
+
+    /// <summary>
+    /// DTO para Resposta: O que o Frontend consome (GET).
+    /// </summary>
+    public record SolicitacaoResponseDTO(
+        int Id,
+        int SolicitanteId,
+        string NomeSolicitante,
+        DateTime DataSolicitacao,
+        string Status,
+        string? Observacao,
+        List<SolicitacaoItemResponseDTO> Itens
+    );
+
+    /// <summary>
+    /// Item da solicitação no retorno.
+    /// </summary>
+    public record SolicitacaoItemResponseDTO(
+        int Id,
+        int ProdutoId,
+        string NomeProduto,
+        decimal Quantidade // Alinhado com a precisão do estoque e da criação
+    );
+
+    /// <summary>
+    /// DTO para Atualização de Status: Simples e direto.
+    /// </summary>
+    public record SolicitacaoStatusUpdateDTO(
+        [Required]
+        [RegularExpression("^(PENDENTE|ENTREGUE|CANCELADO)$", ErrorMessage = "Status inválido.")]
+        string NovoStatus
+    );
+}
+
+---- SolicitanteDTO ----
+
+using System.ComponentModel.DataAnnotations;
+
+namespace EstoqueAPI.DTOs
+{
+    // DTO para Cadastro: O que o Frontend envia ao criar um novo solicitante
+    public record SolicitanteCreateDTO(
+        [Required(ErrorMessage = "O nome do solicitante é obrigatório.")]
+        [StringLength(80, ErrorMessage = "O nome não pode exceder 80 caracteres.")]
+        string Nome,
+
+        [Required(ErrorMessage = "O CPF é obrigatório.")]
+        [RegularExpression(@"^\d{11}$", ErrorMessage = "O CPF deve conter apenas 11 números.")]
+        string CPF, // Substituído 'Documento' por 'CPF'
+
+        [StringLength(20)]
+        string? Telefone,
+
+        [Required(ErrorMessage = "O endereço de entrega é obrigatório.")]
+        [StringLength(200, ErrorMessage = "O endereço é muito longo.")]
+        string EnderecoEntrega, // Novo campo essencial para a logística
+
+        [EmailAddress(ErrorMessage = "E-mail inválido.")]
+        string? Email
+    );
+
+    // DTO para Resposta: O que a API devolve (Seguro, sem expor dados desnecessários)
+    public record SolicitanteResponseDTO(
+        int Id,
+        string Nome,
+        string CPF,
+        string? Telefone,
+        string EnderecoEntrega,
+        string? Email,
+        DateTime DataCadastro // Importante para o Frontend mostrar quando o cadastro foi feito[cite: 1]
+    );
+
+    // DTO para Atualização: O que pode ser editado futuramente
+    public record SolicitanteUpdateDTO(
+        [Required(ErrorMessage = "O nome é obrigatório.")]
+        [StringLength(80)]
+        string Nome,
+
+        [Required(ErrorMessage = "O CPF é obrigatório.")]
+        [RegularExpression(@"^\d{11}$", ErrorMessage = "O CPF deve conter apenas 11 números.")]
+        string CPF,
+
+        string? Telefone,
+
+        [Required(ErrorMessage = "O endereço é obrigatório.")]
+        [StringLength(200)]
+        string EnderecoEntrega,
+
+        string? Email
+    );
+}
+
+---- UsuarioDTO ----
+
+using System.ComponentModel.DataAnnotations;
+
+namespace EstoqueAPI.DTOs
+{
+    /// <summary>
+    /// DTO para Cadastro: Captura a intenção de criar um novo usuário.
+    /// Note que aqui pedimos 'Senha', que o Service converterá em 'SenhaHash'.
+    /// </summary>
+    public record UsuarioCreateDTO(
+        [Required(ErrorMessage = "O nome é obrigatório.")]
+        [StringLength(80, ErrorMessage = "O nome não pode exceder 80 caracteres.")]
+        string Nome,
+
+        [Required(ErrorMessage = "O e-mail é obrigatório.")]
+        [EmailAddress(ErrorMessage = "E-mail em formato inválido.")]
+        string Email,
+
+        [Required(ErrorMessage = "O CPF é obrigatório.")]
+        [RegularExpression(@"^\d{11}$", ErrorMessage = "O CPF deve conter exatamente 11 números.")]
+        string CPF,
+
+        [StringLength(20)]
+        string? Telefone,
+
+        [Required(ErrorMessage = "A senha é obrigatória.")]
+        [StringLength(100, MinimumLength = 8, ErrorMessage = "A senha deve ter no mínimo 8 caracteres.")]
+        string Senha,
+
+        [Required(ErrorMessage = "O tipo de perfil é obrigatório.")]
+        [RegularExpression("^(ADMIN|FUNCIONARIO)$", ErrorMessage = "O tipo deve ser ADMIN ou FUNCIONARIO.")]
+        string Tipo,
+
+        [Required(ErrorMessage = "A data de admissão é obrigatória.")]
+        DateTime DataAdmissao
+    );
+
+    /// <summary>
+    /// DTO para Resposta: O que o mundo exterior vê. 
+    /// Totalmente seguro, sem rastros de senhas.
+    /// </summary>
+    public record UsuarioResponseDTO(
+        int Id,
+        string Nome,
+        string Email,
+        string CPF,
+        string? Telefone,
+        string Tipo,
+        bool Ativo,
+        DateTime DataAdmissao
+    );
+
+    /// <summary>
+    /// DTO para Login: O contrato mínimo para autenticação.
+    /// </summary>
+    public record LoginDTO(
+        [Required(ErrorMessage = "O e-mail é obrigatório.")]
+        [EmailAddress]
+        string Email,
+
+        [Required(ErrorMessage = "A senha é obrigatória.")]
+        string Senha
+    );
+
+    /// <summary>
+    /// DTO para Atualização: Permite alterar dados cadastrais e status, mas não a senha.
+    /// A troca de senha deve ser um endpoint separado (esqueci minha senha/alterar senha).
+    /// </summary>
+    public record UsuarioUpdateDTO(
+        [Required(ErrorMessage = "O nome é obrigatório.")]
+        [StringLength(80)]
+        string Nome,
+
+        [Required(ErrorMessage = "O e-mail é obrigatório.")]
+        [EmailAddress]
+        string Email,
+
+        [StringLength(20)]
+        string? Telefone,
+
+        [Required]
+        [RegularExpression("^(ADMIN|FUNCIONARIO)$")]
+        string Tipo,
+
+        bool Ativo
+    );
+}

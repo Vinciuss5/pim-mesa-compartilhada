@@ -1,0 +1,622 @@
+---- AuthController ----
+
+using EstoqueAPI.DTOs;
+using EstoqueAPI.Services;
+using Microsoft.AspNetCore.Mvc;
+
+namespace EstoqueAPI.Controllers
+{
+    [ApiController]
+    [Route("api/[controller]")]
+    public class AuthController : ControllerBase
+    {
+        private readonly IUsuarioService _usuarioService;
+
+        // Injeção de Dependência: O framework entrega a instância do serviço pronta para uso
+        public AuthController(IUsuarioService usuarioService)
+        {
+            _usuarioService = usuarioService;
+        }
+
+        /// <summary>
+        /// Autentica um usuário e retorna um Token JWT.
+        /// </summary>
+        [HttpPost("login")]
+        public async Task<IActionResult> Login([FromBody] LoginDTO dto)
+        {
+            try
+            {
+                // Delegamos toda a complexidade para o Service
+                var token = await _usuarioService.LoginAsync(dto);
+
+                // Retornamos um objeto anônimo contendo o token. 
+                // O front-end vai ler isso e salvar no LocalStorage ou SessionStorage.
+                return Ok(new { token });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                // Segurança: Se cair aqui, a senha ou e-mail estavam errados.
+                // O status HTTP correto para falha de autenticação é 401 Unauthorized.
+                return Unauthorized(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                // Qualquer outro erro inesperado (ex: banco fora do ar)
+                // O status HTTP correto é 500 Internal Server Error
+                return StatusCode(500, new { message = "Erro interno no servidor.", detalhes = ex.Message });
+            }
+        }
+    }
+}
+
+
+---- DoacaoController ----
+
+using EstoqueAPI.DTOs;
+using EstoqueAPI.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+
+namespace EstoqueAPI.Controllers
+{
+    [ApiController]
+    [Route("api/[controller]")]
+    //[Authorize(Roles = "ADMIN,FUNCIONARIO")]
+    public class DoacaoController : ControllerBase
+    {
+        private readonly IDoacaoService _service;
+        private readonly ILogger<DoacaoController> _logger;
+
+        public DoacaoController(IDoacaoService service, ILogger<DoacaoController> logger)
+        {
+            _service = service;
+            _logger = logger;
+        }
+
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<DoacaoResponseDTO>>> Get()
+        {
+            // O uso de AsNoTracking() no Service (que já configuramos) garante 
+            // que esta listagem seja rápida e leve para a memória.
+            var doacoes = await _service.ListarTodasAsync();
+            return Ok(doacoes);
+        }
+
+        [HttpPost]
+        public async Task<ActionResult<DoacaoResponseDTO>> Post([FromBody] DoacaoCreateDTO dto)
+        {
+            // Validação de segurança: Proteção contra payloads vazios que passam pelo bind
+            if (dto == null) return BadRequest(new { message = "Corpo da requisição inválido." });
+
+            try
+            {
+                // A mágica acontece no Service (Transação + Estoque + Log)
+                var resultado = await _service.CriarAsync(dto);
+
+                // Tech Lead Tip: Retornamos Ok() se não houver um endpoint específico de busca por ID
+                // ou Created() se quisermos seguir o protocolo REST à risca.
+                return Ok(resultado);
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Aqui capturamos o erro do Service quando o Rollback acontece.
+                // O log aqui serve para o desenvolvedor saber o que o cliente tentou fazer.
+                _logger.LogWarning("Tentativa de doação inválida: {Message}", ex.Message);
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                // Erros inesperados (Banco offline, queda de conexão, etc)
+                _logger.LogError(ex, "Erro catastrófico no processamento da doação.");
+
+                return StatusCode(500, new
+                {
+                    message = "Serviço temporariamente indisponível. O incidente foi registrado para análise."
+                });
+            }
+        }
+    }
+}
+
+---- DoadorController ----
+
+using EstoqueAPI.DTOs;
+using EstoqueAPI.Services;
+using Microsoft.AspNetCore.Authorization; // 1. Importante para habilitar as travas
+using Microsoft.AspNetCore.Mvc;
+
+namespace EstoqueAPI.Controllers
+{
+    [ApiController]
+    [Route("api/[controller]")]
+    // 2. A Blindagem Operacional: Permite que Admins e Funcionários gerenciem doadores
+    //[Authorize(Roles = "ADMIN,FUNCIONARIO")]
+    public class DoadorController : ControllerBase
+    {
+        private readonly IDoadorService _service;
+
+        public DoadorController(IDoadorService service)
+        {
+            _service = service;
+        }
+
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<DoadorResponseDTO>>> Get([FromQuery] string? filtro)
+        {
+            var doadores = await _service.ListarTodosAsync(filtro);
+            return Ok(doadores);
+        }
+
+        [HttpGet("{id}")]
+        public async Task<ActionResult<DoadorResponseDTO>> GetById(int id)
+        {
+            var doador = await _service.BuscarPorIdAsync(id);
+            if (doador == null)
+                return NotFound(new { message = "Doador não encontrado." });
+
+            return Ok(doador);
+        }
+
+        [HttpPost]
+        public async Task<ActionResult<DoadorResponseDTO>> Post([FromBody] DoadorCreateDTO dto)
+        {
+            try
+            {
+                var resultado = await _service.CriarAsync(dto);
+                return CreatedAtAction(nameof(GetById), new { id = resultado.Id }, resultado);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpPut("{id}")]
+        public async Task<IActionResult> Put(int id, [FromBody] DoadorUpdateDTO dto)
+        {
+            var atualizado = await _service.AtualizarAsync(id, dto);
+            if (!atualizado)
+                return NotFound(new { message = "Doador não encontrado para atualização." });
+
+            return NoContent();
+        }
+
+        [HttpDelete("{id}")]
+
+        public async Task<IActionResult> Delete(int id)
+        {
+            var excluido = await _service.ExcluirAsync(id);
+            if (!excluido)
+                return NotFound(new { message = "Doador não encontrado para exclusão." });
+
+            return NoContent();
+        }
+    }
+}
+
+
+--- EstoqueController ----
+
+using EstoqueAPI.DTOs;
+using EstoqueAPI.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+
+namespace EstoqueAPI.Controllers
+{
+    [ApiController]
+    [Route("api/[controller]")]
+    // Blindagem Operacional: Ambos os perfis podem consultar o saldo de estoque
+    //[Authorize(Roles = "ADMIN,FUNCIONARIO")]
+    public class EstoqueController : ControllerBase
+    {
+        private readonly IEstoqueService _estoqueService;
+
+        public EstoqueController(IEstoqueService estoqueService)
+        {
+            _estoqueService = estoqueService;
+        }
+
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<EstoqueResponseDTO>>> Get()
+        {
+            // Busca todos os produtos que possuem saldo em estoque
+            var estoque = await _estoqueService.ListarEstoqueAtualAsync();
+            return Ok(estoque);
+        }
+
+        [HttpGet("produto/{produtoId}")]
+        public async Task<ActionResult<EstoqueResponseDTO>> GetByProduto(int produtoId)
+        {
+            // Busca o saldo específico de um produto
+            var saldo = await _estoqueService.BuscarSaldoPorProdutoAsync(produtoId);
+
+            if (saldo == null)
+                return NotFound(new { message = "Produto não encontrado ou sem saldo em estoque." });
+
+            return Ok(saldo);
+        }
+
+        [HttpGet("baixo-estoque")]
+        public async Task<ActionResult<IEnumerable<EstoqueResponseDTO>>> GetBaixoEstoque([FromQuery] int limite = 5)
+        {
+            // Endpoint estratégico: Lista produtos que estão com pouca quantidade (ex: menos de 5 unidades)
+            // Útil para a ONG saber o que precisa pedir urgentemente aos doadores
+            var alerta = await _estoqueService.ListarProdutosComBaixoEstoqueAsync(limite);
+            return Ok(alerta);
+        }
+    }
+}
+
+---- ProdutoController ----
+
+using EstoqueAPI.DTOs;
+using EstoqueAPI.Services;
+using Microsoft.AspNetCore.Authorization; // 1. Habilita o atributo de segurança
+using Microsoft.AspNetCore.Mvc;
+
+namespace EstoqueAPI.Controllers
+{
+    [ApiController]
+    [Route("api/[controller]")]
+    // 2. Blindagem Operacional: Admins e Funcionários podem gerenciar o catálogo de produtos
+    //[Authorize(Roles = "ADMIN,FUNCIONARIO")]
+    public class ProdutoController : ControllerBase
+    {
+        private readonly IProdutoService _service;
+
+        public ProdutoController(IProdutoService service)
+        {
+            _service = service;
+        }
+
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<ProdutoResponseDTO>>> Get()
+        {
+            var produtos = await _service.ListarTodosAsync();
+            return Ok(produtos);
+        }
+
+        [HttpGet("{id}")]
+        public async Task<ActionResult<ProdutoResponseDTO>> GetById(int id)
+        {
+            var produto = await _service.BuscarPorIdAsync(id);
+
+            if (produto == null)
+                return NotFound(new { message = $"Produto com ID {id} não encontrado." });
+
+            return Ok(produto);
+        }
+
+        [HttpPost]
+        public async Task<ActionResult<ProdutoResponseDTO>> Post([FromBody] ProdutoCreateDTO dto)
+        {
+            // O [ApiController] já faz a validação automática do ModelState
+            var resultado = await _service.CriarAsync(dto);
+
+            return CreatedAtAction(nameof(GetById), new { id = resultado.Id }, resultado);
+        }
+
+        [HttpPut("{id}")]
+        public async Task<IActionResult> Put(int id, [FromBody] ProdutoUpdateDTO dto)
+        {
+            var atualizado = await _service.AtualizarAsync(id, dto);
+
+            if (!atualizado)
+                return NotFound(new { message = $"Não foi possível atualizar. Produto ID {id} não encontrado." });
+
+            return NoContent();
+        }
+
+        [HttpDelete("{id}")]
+        // Dica de Tech Lead: Se quiser ser mais rigoroso, pode restringir a exclusão de produtos
+        // apenas para administradores descomentando a linha abaixo:
+        // [Authorize(Roles = "ADMIN")]
+        public async Task<IActionResult> Delete(int id)
+        {
+            var excluido = await _service.ExcluirAsync(id);
+
+            if (!excluido)
+                return NotFound(new { message = $"Não foi possível excluir. Produto ID {id} não encontrado." });
+
+            return NoContent();
+        }
+    }
+}
+
+
+---- SolicitacaoController ----
+
+using EstoqueAPI.DTOs;
+using EstoqueAPI.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+
+namespace EstoqueAPI.Controllers
+{
+    [Route("api/[controller]")]
+    [ApiController]
+    //[Authorize(Roles = "ADMIN,FUNCIONARIO")]
+    public class SolicitacaoController : ControllerBase
+    {
+        private readonly ISolicitacaoService _solicitacaoService;
+        private readonly ILogger<SolicitacaoController> _logger; // Adicionado para auditoria
+
+        public SolicitacaoController(ISolicitacaoService solicitacaoService, ILogger<SolicitacaoController> logger)
+        {
+            _solicitacaoService = solicitacaoService;
+            _logger = logger;
+        }
+
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<SolicitacaoResponseDTO>>> Get()
+        {
+            var solicitacoes = await _solicitacaoService.ListarTodasAsync();
+            return Ok(solicitacoes);
+        }
+
+        [HttpGet("{id}")]
+        public async Task<ActionResult<SolicitacaoResponseDTO>> GetById(int id)
+        {
+            var solicitacao = await _solicitacaoService.BuscarPorIdAsync(id);
+
+            if (solicitacao == null)
+            {
+                return NotFound(new { message = $"Solicitação com ID {id} não encontrada." });
+            }
+
+            return Ok(solicitacao);
+        }
+
+        [HttpPost]
+        public async Task<ActionResult<SolicitacaoResponseDTO>> Post([FromBody] SolicitacaoCreateDTO dto)
+        {
+            // O ASP.NET Core já valida o [Required] e [Range] do DTO automaticamente.
+            // Se o JSON for inválido, ele retorna 400 antes de chegar aqui.
+
+            try
+            {
+                var resultado = await _solicitacaoService.CriarAsync(dto);
+
+                // Retorno 201 Created: Indica sucesso e onde encontrar o novo recurso
+                return CreatedAtAction(nameof(GetById), new { id = resultado.Id }, resultado);
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Erros de Regra de Negócio: Saldo insuficiente, produto inativo, etc.
+                _logger.LogWarning(ex, "Falha na regra de negócio ao criar solicitação.");
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                // Erros Críticos: Banco fora do ar, erro de rede, etc.
+                // Aqui resolvemos o Warning CS0168 usando a variável 'ex' no log.
+                _logger.LogError(ex, "Erro interno crítico ao processar saída de estoque.");
+
+                return StatusCode(500, new
+                {
+                    message = "Ocorreu um erro interno no servidor ao processar sua solicitação. Tente novamente mais tarde."
+                });
+            }
+        }
+
+        [HttpPatch("{id}/status")]
+        //[Authorize(Roles = "ADMIN")]
+        public async Task<IActionResult> UpdateStatus(int id, [FromBody] SolicitacaoStatusUpdateDTO dto)
+        {
+            try
+            {
+                var sucesso = await _solicitacaoService.AtualizarStatusAsync(id, dto.NovoStatus);
+
+                if (!sucesso)
+                    return NotFound(new { message = "Solicitação não encontrada para atualização." });
+
+                return NoContent(); // 204: Sucesso, mas sem corpo de resposta
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Tentativa inválida de mudança de status para ID {Id}", id);
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Erro ao atualizar status da solicitação {Id}", id);
+                return StatusCode(500, new { message = "Erro ao atualizar status." });
+            }
+        }
+    }
+}
+
+
+---- SolicitanteController ----
+
+using EstoqueAPI.DTOs;
+using EstoqueAPI.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+
+namespace EstoqueAPI.Controllers
+{
+    [ApiController]
+    [Route("api/[controller]")]
+    // Blindagem: Controle de acesso centralizado na classe
+    //[Authorize(Roles = "ADMIN,FUNCIONARIO")]
+    public class SolicitanteController : ControllerBase
+    {
+        private readonly ISolicitanteService _service;
+
+        public SolicitanteController(ISolicitanteService service)
+        {
+            _service = service;
+        }
+
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<SolicitanteResponseDTO>>> Get([FromQuery] string? search)
+        {
+            var solicitantes = await _service.ListarTodosAsync(search);
+            return Ok(solicitantes);
+        }
+
+        [HttpGet("{id}")]
+        public async Task<ActionResult<SolicitanteResponseDTO>> GetById(int id)
+        {
+            var solicitante = await _service.BuscarPorIdAsync(id);
+            if (solicitante == null)
+                return NotFound(new { message = "Solicitante não encontrado." });
+
+            return Ok(solicitante);
+        }
+
+        [HttpPost]
+        public async Task<ActionResult<SolicitanteResponseDTO>> Post([FromBody] SolicitanteCreateDTO dto)
+        {
+            try
+            {
+                var resultado = await _service.CriarAsync(dto);
+                // Retorno 201 Created com o cabeçalho 'Location'
+                return CreatedAtAction(nameof(GetById), new { id = resultado.Id }, resultado);
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Captura erros de CPF duplicado lançados pelo Service
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception)
+            {
+                // Fallback para erros inesperados (Segurança: não expomos stack trace)
+                return StatusCode(500, new { message = "Ocorreu um erro interno ao processar o cadastro." });
+            }
+        }
+
+        [HttpPut("{id}")]
+        public async Task<IActionResult> Put(int id, [FromBody] SolicitanteUpdateDTO dto)
+        {
+            try
+            {
+                var atualizado = await _service.AtualizarAsync(id, dto);
+                if (!atualizado)
+                    return NotFound(new { message = "Solicitante não encontrado para atualização." });
+
+                return NoContent(); // Status 204: Sucesso sem corpo de resposta
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpDelete("{id}")]
+        // Restrição de autorização específica para o método Delete
+        [Authorize(Roles = "ADMIN")]
+        public async Task<IActionResult> Delete(int id)
+        {
+            try
+            {
+                var excluido = await _service.ExcluirAsync(id);
+                if (!excluido)
+                    return NotFound(new { message = "Solicitante não encontrado para exclusão." });
+
+                return NoContent();
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Captura erro caso o solicitante possua pedidos vinculados
+                return Conflict(new { message = ex.Message }); // Status 409: Conflito de integridade
+            }
+        }
+    }
+}
+
+
+---- UsuarioController ----
+
+using EstoqueAPI.DTOs;
+using EstoqueAPI.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+
+namespace EstoqueAPI.Controllers
+{
+    [ApiController]
+    [Route("api/[controller]")]
+    // A "Blindagem": Apenas administradores gerenciam a equipe
+    //[Authorize(Roles = "ADMIN")]
+    public class UsuarioController : ControllerBase
+    {
+        private readonly IUsuarioService _usuarioService;
+
+        public UsuarioController(IUsuarioService usuarioService)
+        {
+            _usuarioService = usuarioService;
+        }
+
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<UsuarioResponseDTO>>> Get()
+        {
+            var usuarios = await _usuarioService.ListarTodosAsync();
+            return Ok(usuarios);
+        }
+
+        [HttpGet("{id}")]
+        public async Task<ActionResult<UsuarioResponseDTO>> GetById(int id)
+        {
+            var usuario = await _usuarioService.BuscarPorIdAsync(id);
+
+            if (usuario == null)
+                return NotFound(new { message = "Usuário não encontrado." });
+
+            return Ok(usuario);
+        }
+
+        [HttpPost]
+        public async Task<ActionResult<UsuarioResponseDTO>> Post([FromBody] UsuarioCreateDTO dto)
+        {
+            try
+            {
+                var novoUsuario = await _usuarioService.CriarAsync(dto);
+                return CreatedAtAction(nameof(GetById), new { id = novoUsuario.Id }, novoUsuario);
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Captura erros de regra de negócio (CPF/E-mail já existentes)
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception)
+            {
+                // Segurança: Não expomos detalhes técnicos em erros 500
+                return StatusCode(500, new { message = "Erro interno ao processar o cadastro do usuário." });
+            }
+        }
+
+        [HttpPut("{id}")]
+        public async Task<IActionResult> Put(int id, [FromBody] UsuarioUpdateDTO dto)
+        {
+            try
+            {
+                var atualizado = await _usuarioService.AtualizarAsync(id, dto);
+
+                if (!atualizado)
+                    return NotFound(new { message = "Usuário não encontrado para atualização." });
+
+                return NoContent();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> Delete(int id)
+        {
+            // RN: Implementamos a exclusão lógica (Inativação) para manter integridade de logs
+            var inativado = await _usuarioService.InativarAsync(id);
+
+            if (!inativado)
+                return NotFound(new { message = "Usuário não encontrado." });
+
+            return NoContent();
+        }
+    }
+}
+

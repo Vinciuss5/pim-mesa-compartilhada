@@ -1,0 +1,357 @@
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace EstoqueAPI.Models
+{
+    // 1. BLINDAGEM DE TABELA: Garante o mapeamento exato para a tabela 'Doacoes'
+    [Table("Doacoes")]
+    public class Doacao
+    {
+        [Key]
+        public int Id { get; set; }
+
+        [Required]
+        public int DoadorId { get; set; }
+
+        [Required]
+        [Column("Data")]
+        public DateTime Data { get; set; } = DateTime.Now; // Defesa de código: valor padrão na criação
+
+        // --- Relacionamentos ---
+
+        // 2. SEGURANÇA DE REFATORAÇÃO: O uso do nameof() protege o código contra renomeações acidentais.
+        // 3. NULL SAFETY: Ao deixar 'Doador?' anulável, obrigamos o desenvolvedor a verificar 
+        // a nulidade no Service, evitando NullReferenceExceptions caso falte um .Include().
+        [ForeignKey(nameof(DoadorId))]
+        public virtual Doador? Doador { get; set; } = null!;
+
+        // Mantido conforme a sua estrutura original para carregar a lista de itens vinculados.
+        public virtual ICollection<DoacaoItem> Itens { get; set; } = new List<DoacaoItem>();
+    }
+}
+
+
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace EstoqueAPI.Models
+{
+    [Table("DoacaoItens")] // Padronização de nome de tabela no plural
+    public class DoacaoItem
+    {
+        [Key]
+        public int Id { get; set; }
+
+        [Required]
+        public int DoacaoId { get; set; }
+
+        [Required]
+        public int ProdutoId { get; set; }
+
+        [Required]
+        // CORREÇÃO: Alterado para decimal(18,2) para suportar Kg/Litros
+        // O Range agora permite frações a partir de 0.01
+        [Range(0.01, 9999999.99, ErrorMessage = "A quantidade deve ser maior que zero.")]
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal Quantidade { get; set; }
+
+        [DataType(DataType.Date)]
+        public DateTime? DataValidade { get; set; }
+
+        // --- Relacionamentos (Navegação) ---
+
+        // CORREÇÃO: Uso de nameof() para evitar 'DoacaoId1' e suporte a Nullable para segurança de navegação
+        [ForeignKey(nameof(DoacaoId))]
+        public virtual Doacao? Doacao { get; set; }
+
+        // CORREÇÃO: Vinculação explícita com Produto para garantir integridade referencial
+        [ForeignKey(nameof(ProdutoId))]
+        public virtual Produto? Produto { get; set; }
+    }
+}
+
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace EstoqueAPI.Models
+{
+    // 1. PADRONIZAÇÃO: Explicitando o nome da tabela no plural
+    [Table("Doadores")]
+    public class Doador
+    {
+        [Key]
+        public int Id { get; set; }
+
+        [Required(ErrorMessage = "O nome do doador é obrigatório.")]
+        [StringLength(80)]
+        public string Nome { get; set; } = string.Empty;
+
+        [EmailAddress(ErrorMessage = "E-mail em formato inválido.")]
+        [StringLength(120)]
+        public string? Email { get; set; }
+
+        [StringLength(20)]
+        public string? Telefone { get; set; }
+
+        [StringLength(11)]
+        [RegularExpression(@"^\d{11}$", ErrorMessage = "O CPF deve conter apenas 11 números.")]
+        public string? CPF { get; set; }
+
+        [StringLength(150)]
+        public string? Endereco { get; set; }
+
+        // --- Relacionamentos (Navegação) ---
+
+        /// <summary>
+        /// 2. MAPEAMENTO INVERSO: O atributo InverseProperty vincula esta coleção 
+        /// à propriedade de navegação 'Doador' que existe dentro da classe Doacao.
+        /// Isso elimina a criação da coluna 'DoadorId1' no banco de dados.
+        /// </summary>
+        [InverseProperty(nameof(Doacao.Doador))]
+        public virtual ICollection<Doacao> Doacoes { get; set; } = new List<Doacao>();
+    }
+}
+
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace EstoqueAPI.Models
+{
+    [Table("Estoque")] // Explicitando o nome da tabela
+    public class Estoque
+    {
+        [Key]
+        public int Id { get; set; }
+
+        // Chave Estrangeira explícita. O [Required] garante a obrigatoriedade no banco
+        [Required]
+        public int ProdutoId { get; set; }
+
+        // Propriedade de Navegação.
+        // O uso do nameof() aqui é a garantia que o EF precisa para ligar esta propriedade à coluna ProdutoId acima
+        [ForeignKey(nameof(ProdutoId))]
+        public virtual Produto? Produto { get; set; } = null!;
+
+        [Required]
+        [Range(0, 9999999.99, ErrorMessage = "A quantidade deve ser positiva.")]
+        [Column(TypeName = "decimal(18,2)")] // Tipagem mantida para suportar pesagens com precisão[cite: 1]
+        public decimal Quantidade { get; set; }
+
+        [Required]
+        public DateTime DataEntrada { get; set; } = DateTime.Now;
+
+        // Propriedade mantida para a regra PVPS[cite: 1]
+        public DateTime? DataValidade { get; set; }
+
+        [StringLength(100)]
+        public string? Origem { get; set; }
+
+        // LoteCodigo mantido para a sua rastreabilidade[cite: 1]
+        [StringLength(50)]
+        public string? LoteCodigo { get; set; }
+    }
+}
+
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace EstoqueAPI.Models
+{
+    // 1. BLINDAGEM DE TABELA: Explicitando o nome da tabela no plural
+    [Table("Produtos")]
+    public class Produto
+    {
+        [Key]
+        public int Id { get; set; }
+
+        [Required(ErrorMessage = "O nome do produto é obrigatório.")]
+        [StringLength(80)]
+        public string Nome { get; set; } = string.Empty;
+
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal? PesoKg { get; set; }
+
+        // --- Relacionamentos (Navegação) ---
+
+        /// <summary>
+        /// 2. MAPEAMENTO INVERSO: O atributo InverseProperty garante que o EF ligue 
+        /// estas coleções às chaves estrangeiras que definimos nas outras models.
+        /// </summary>
+
+        [InverseProperty(nameof(Estoque.Produto))]
+        public virtual ICollection<Estoque> Estoques { get; set; } = new List<Estoque>();
+
+        [InverseProperty(nameof(DoacaoItem.Produto))]
+        public virtual ICollection<DoacaoItem> DoacaoItens { get; set; } = new List<DoacaoItem>();
+
+        [InverseProperty(nameof(SolicitacaoItem.Produto))]
+        public virtual ICollection<SolicitacaoItem> SolicitacaoItens { get; set; } = new List<SolicitacaoItem>();
+    }
+}
+
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace EstoqueAPI.Models
+{
+    [Table("Solicitacoes")] // Boa prática: Garante o nome da tabela no plural para evitar confusão do EF
+    public class Solicitacao
+    {
+        [Key]
+        public int Id { get; set; }
+
+        [Required(ErrorMessage = "O solicitante é obrigatório.")]
+        public int SolicitanteId { get; set; }
+
+        [Required]
+        // Mantido o nome sugerido para refletir o momento da criação
+        public DateTime DataSolicitacao { get; set; } = DateTime.Now;
+
+        [Required]
+        [StringLength(20)]
+        // Status: PENDENTE, ENTREGUE, CANCELADO
+        public string Status { get; set; } = "PENDENTE";
+
+        [StringLength(255)]
+        public string? Observacao { get; set; }
+
+        // --- Relacionamentos (Navegação) ---
+
+        // CORREÇÃO CRÍTICA: O nameof garante que o EF ligue esta propriedade ao SolicitanteId acima.
+        // O uso do '?' permite que o objeto seja nulo se não usarmos .Include(), evitando erros de mapeamento.
+        [ForeignKey(nameof(SolicitanteId))]
+        public virtual Solicitante? Solicitante { get; set; } = null!;
+
+        // Mantido para carregar os itens desta solicitação
+        public virtual ICollection<SolicitacaoItem> Itens { get; set; } = new List<SolicitacaoItem>();
+    }
+}
+
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace EstoqueAPI.Models
+{
+    [Table("SolicitacaoItens")] // Mantendo a padronização de nomes de tabela
+    public class SolicitacaoItem
+    {
+        [Key]
+        public int Id { get; set; }
+
+        [Required]
+        public int SolicitacaoId { get; set; }
+
+        [Required]
+        public int ProdutoId { get; set; }
+
+        [Required]
+        // CORREÇÃO: Alterado para decimal para permitir fracionamento (Kg/Litros)
+        // O Range começa em 0.01 para permitir pequenas frações
+        [Range(0.01, 9999999.99, ErrorMessage = "A quantidade solicitada deve ser maior que zero.")]
+        [Column(TypeName = "decimal(18,2)")]
+        public decimal Quantidade { get; set; }
+
+        // --- Relacionamentos (Navegação) ---
+
+        // Referência para a Solicitação "pai". O nameof vincula sem erro de shadow property.
+        [ForeignKey(nameof(SolicitacaoId))]
+        public virtual Solicitacao? Solicitacao { get; set; }
+
+        // Referência para o Produto. Uso do anulável evita avisos de desreferência nula.
+        [ForeignKey(nameof(ProdutoId))]
+        public virtual Produto? Produto { get; set; }
+    }
+}
+
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace EstoqueAPI.Models
+{
+    // 1. BLINDAGEM DE TABELA: Explicitando o nome da tabela no plural para o EF
+    [Table("Solicitantes")]
+    public class Solicitante
+    {
+        [Key]
+        public int Id { get; set; }
+
+        [Required(ErrorMessage = "O nome do solicitante é obrigatório.")]
+        [StringLength(80)]
+        public string Nome { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "O CPF é obrigatório para evitar duplicidade de cadastros.")]
+        [StringLength(11, MinimumLength = 11, ErrorMessage = "O CPF deve conter exatamente 11 dígitos.")]
+        [Column(TypeName = "CHAR(11)")]
+        public string CPF { get; set; } = string.Empty;
+
+        [EmailAddress(ErrorMessage = "E-mail em formato inválido.")]
+        [StringLength(120)]
+        public string? Email { get; set; }
+
+        [StringLength(20)]
+        public string? Telefone { get; set; }
+
+        [Required(ErrorMessage = "O endereço de entrega é vital para a logística.")]
+        [StringLength(200, ErrorMessage = "O endereço não pode exceder 200 caracteres.")]
+        public string EnderecoEntrega { get; set; } = string.Empty;
+
+        [Required]
+        public DateTime DataCadastro { get; set; } = DateTime.Now;
+
+        // --- Relacionamentos (Navegação) ---
+
+        /// <summary>
+        /// 2. RELACIONAMENTO INVERSO: Mantemos a coleção, mas garantimos que 
+        /// o EF saiba que o "SolicitanteId" na tabela Solicitacao aponta para cá.
+        /// </summary>
+        [InverseProperty(nameof(Solicitacao.Solicitante))]
+        public virtual ICollection<Solicitacao> Solicitacoes { get; set; } = new List<Solicitacao>();
+    }
+}
+
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace EstoqueAPI.Models
+{
+    public class Usuario
+    {
+        [Key]
+        public int Id { get; set; }
+
+        [Required(ErrorMessage = "O nome é obrigatório.")]
+        [StringLength(80)]
+        public string Nome { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "O e-mail é obrigatório.")]
+        [EmailAddress(ErrorMessage = "E-mail em formato inválido.")]
+        [StringLength(120)]
+        public string Email { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "O CPF é obrigatório.")]
+        [StringLength(11, MinimumLength = 11)]
+        [Column(TypeName = "CHAR(11)")] // Otimização de banco: CPF sempre tem 11 caracteres
+        public string CPF { get; set; } = string.Empty;
+
+        [StringLength(20)]
+        public string? Telefone { get; set; }
+
+        [Required]
+        public DateTime DataAdmissao { get; set; } = DateTime.Now;
+
+        [Required]
+        [StringLength(255)]
+        public string SenhaHash { get; set; } = string.Empty;
+
+        [Required]
+        [StringLength(10)]
+        public string Tipo { get; set; } = "FUNCIONARIO"; // ADMIN ou FUNCIONARIO[cite: 7]
+
+        public bool Ativo { get; set; } = true;
+
+        // --- Relacionamentos (Navegação) ---
+
+        // Um usuário pode ser autor de vários logs de sistema[cite: 7]
+        public virtual ICollection<Logs> Logs { get; set; } = new List<Logs>();
+    }
+}

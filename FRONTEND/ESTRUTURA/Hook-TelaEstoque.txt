@@ -1,0 +1,504 @@
+Tela Estoque.jsx
+
+import { useState, useEffect, useMemo } from 'react';
+import { useEstoque } from '../../hooks/useEstoque'; // Ajuste o caminho conforme a sua estrutura de pastas
+
+export default function EstoqueIndex() {
+  const { estoque, isLoading, error, fetchEstoque, createProduto } = useEstoque(); 
+  
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [formData, setFormData] = useState({ nome: '', peso: '' });
+  const [salvando, setSalvando] = useState(false);
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSalvando(true);
+
+    const result = await createProduto(formData); // já converte Nome/PesoKg dentro do hook
+
+    setSalvando(false);
+
+    if (result.success) {
+      setIsModalOpen(false);
+      setFormData({ nome: '', peso: '' });
+      // Não precisa de fetchEstoque() aqui: produto novo entra sem saldo,
+      // só aparece no Estoque quando receber uma doação.
+    } else {
+      alert(`Erro ao cadastrar produto: ${result.message}`);
+    }
+  };
+
+
+  // Estados para os filtros
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('Todos os Status');
+
+  // Busca os dados assim que a tela é montada
+  useEffect(() => {
+    fetchEstoque();
+  }, [fetchEstoque]);
+
+  // 1. Lógica dos Mini Relatórios (KPIs) calculada dinamicamente
+// 1. Lógica dos Mini Relatórios (KPIs) calculada dinamicamente
+  const metrics = useMemo(() => {
+    let skusAtivos = 0;
+    let baixoEstoque = 0; // Mudamos o nome aqui
+    let vencimentoProximo = 0;
+
+    const hoje = new Date();
+
+    estoque.forEach(item => {
+      // Conta SKUs ativos (que têm pelo menos 1 item no estoque)
+      if (item.qtd > 0) skusAtivos++;
+      
+      // NOVA LÓGICA: Conta itens que estão com o status de baixo estoque
+      if (item.status?.toLowerCase() === 'baixo estoque') {
+        baixoEstoque++;
+      }
+
+      // Calcula proximidade de vencimento (90 dias)
+      if (item.validade && item.validade !== 'N/A') {
+        const [dia, mes, ano] = item.validade.split('/');
+        const dataValidade = new Date(`${ano}-${mes}-${dia}T00:00:00`);
+        
+        const diffTempo = dataValidade.getTime() - hoje.getTime();
+        const diffDias = Math.ceil(diffTempo / (1000 * 3600 * 24));
+        
+        if (diffDias > 0 && diffDias <= 90 && item.qtd > 0) { // Adicionamos item.qtd > 0 aqui também
+          vencimentoProximo++;
+        }
+      }
+    });
+
+    return { skusAtivos, baixoEstoque, vencimentoProximo }; // Retornamos baixoEstoque
+  }, [estoque]);
+
+  // 2. Lógica do Filtro Robusto
+  const estoqueFiltrado = useMemo(() => {
+    return estoque.filter((item) => {
+      // Normaliza a busca para evitar erros com maiúsculas/minúsculas
+      const search = searchTerm.toLowerCase().trim();
+      
+      // Validação de segurança para campos que podem vir nulos
+      const nome = item.nome?.toLowerCase() || '';
+      const lote = item.lote?.toLowerCase() || '';
+      const origem = item.origem?.toLowerCase() || '';
+      const statusItem = item.status?.toLowerCase() || '';
+
+      const matchBusca = 
+        nome.includes(search) || 
+        lote.includes(search) || 
+        origem.includes(search);
+
+      const matchStatus = 
+        statusFilter === 'Todos os Status' || 
+        statusItem === statusFilter.toLowerCase();
+
+      return matchBusca && matchStatus;
+    });
+  }, [estoque, searchTerm, statusFilter]);
+
+  const getStatusColor = (status) => {
+    // Normalizando a string para evitar quebras por diferenças de casing
+    const st = status?.toLowerCase();
+    switch (st) {
+      case 'disponível': return 'bg-green-50 text-green-700 border-green-100';
+      case 'baixo estoque': return 'bg-orange-50 text-orange-700 border-orange-100';
+      case 'esgotado': return 'bg-red-50 text-red-700 border-red-100';
+      default: return 'bg-gray-50 text-gray-700';
+    }
+  };
+
+  const checkVencimentoProximo = (validade) => {
+  if (!validade || validade === 'N/A') return false;
+  const [dia, mes, ano] = validade.split('/');
+  const dataValidade = new Date(`${ano}-${mes}-${dia}T00:00:00`);
+  const hoje = new Date();
+  const diffTempo = dataValidade.getTime() - hoje.getTime();
+  const diffDias = Math.ceil(diffTempo / (1000 * 3600 * 24));
+  return diffDias > 0 && diffDias <= 90;
+};
+
+  return (
+    <div className="min-h-screen bg-[#F8F9FA] text-[#2D3748] p-8 font-sans">
+      
+      {/* HEADER */}
+      <div className="mb-8 flex justify-between items-center">
+        <div>
+          <h1 className="text-2xl font-bold text-[#2D3748]">Controle de Estoque</h1>
+          <p className="text-sm text-[#718096] mt-1">Gestão inteligente de itens e prazos.</p>
+        </div>
+        <button
+          onClick={() => setIsModalOpen(true)}
+          className="bg-[#007F45] hover:bg-[#006838] text-white px-4 py-2 rounded-md font-medium transition-colors flex items-center gap-2 text-sm shadow-sm"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+          Cadastrar Produto
+        </button>
+      </div>
+
+      {/* DASHBOARD CARDS */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm flex flex-col justify-between">
+          <span className="text-xs uppercase tracking-wider font-bold text-[#718096]">Total de Itens</span>
+          <div className="flex items-baseline gap-2 mt-2">
+            <span className="text-3xl font-extrabold">{metrics.skusAtivos}</span>
+            <span className="text-xs text-green-600 font-medium">SKUs ativos</span>
+          </div>
+        </div>
+        
+      <div className="bg-white p-5 rounded-xl border-l-4 border-l-amber-500 shadow-sm flex flex-col justify-between border-y border-r border-gray-100">
+        <span className="text-xs uppercase tracking-wider font-bold text-[#718096]">Baixo Estoque</span>
+        <div className="flex items-baseline gap-2 mt-2">
+          <span className="text-3xl font-extrabold text-amber-600">{metrics.baixoEstoque}</span>
+          <span className="text-xs text-amber-500 font-medium">Ação preventiva</span>
+        </div>
+      </div>
+
+        <div className="bg-white p-5 rounded-xl border-l-4 border-l-orange-400 shadow-sm flex flex-col justify-between border-y border-r border-gray-100">
+          <span className="text-xs uppercase tracking-wider font-bold text-[#718096]">Próximos ao Vencimento</span>
+          <div className="flex items-baseline gap-2 mt-2">
+            <span className="text-3xl font-extrabold text-orange-600">{metrics.vencimentoProximo}</span>
+            <span className="text-xs text-orange-400">Prox. 3 Meses</span>
+          </div>
+        </div>
+      </div>
+
+      {/* FILTROS */}
+      <div className="bg-white p-4 rounded-t-xl border border-gray-100 flex flex-col md:flex-row gap-4">
+        <div className="relative flex-grow">
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <svg className="h-4 w-4 text-[#718096]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+            </svg>
+          </div>
+          <input 
+            type="text" 
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Filtrar produtos por nome ou origem..." 
+            className="block w-full pl-10 pr-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-[#007F45]/20 focus:border-[#007F45] outline-none"
+          />
+        </div>
+        <div className="flex gap-2">
+            <select 
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="py-2 px-3 border border-gray-200 rounded-lg text-sm focus:border-[#007F45] outline-none bg-white font-medium"
+            >
+                <option value="Todos os Status">Todos os Status</option>
+                <option value="Disponível">Disponível</option>
+                <option value="Baixo estoque">Baixo Estoque</option>
+            </select>
+        </div>
+      </div>
+
+      {/* ESTADOS DE CARREGAMENTO E ERRO */}
+      {isLoading && (
+        <div className="bg-white p-8 text-center text-gray-500 border-x border-b border-gray-100 rounded-b-xl">
+          Carregando estoque...
+        </div>
+      )}
+
+      {error && !isLoading && (
+        <div className="bg-white p-8 text-center text-red-500 border-x border-b border-gray-100 rounded-b-xl">
+          Erro ao carregar dados: {error}
+        </div>
+      )}
+
+      {/* TABELA */}
+      {!isLoading && !error && (
+        <div className="bg-white rounded-b-xl shadow-sm border-x border-b border-gray-100 overflow-x-auto">
+          <table className="w-full text-sm min-w-[900px]">
+            <thead className="bg-gray-50/50 border-b border-gray-100 text-[#718096]">
+              <tr>
+                <th className="px-5 py-4 font-semibold text-left uppercase tracking-tighter text-[11px]">Produto</th>
+                <th className="px-4 py-4 font-semibold text-left uppercase tracking-tighter text-[11px]">Estoque Atual</th>
+                <th className="px-4 py-4 font-semibold text-left uppercase tracking-tighter text-[11px]">Status</th>
+                <th className="px-4 py-4 font-semibold text-left uppercase tracking-tighter text-[11px]">Origem</th>
+                <th className="px-4 py-4 font-semibold text-left uppercase tracking-tighter text-[11px]">Entrada</th>
+                <th className="px-4 py-4 font-semibold text-left uppercase tracking-tighter text-[11px]">Validade</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {estoqueFiltrado.length === 0 ? (
+                <tr>
+                  <td colSpan="6" className="px-5 py-8 text-center text-gray-500">
+                    Nenhum produto encontrado.
+                  </td>
+                </tr>
+              ) : (
+                estoqueFiltrado.map((item) => (
+                  <tr key={item.id} className="hover:bg-gray-50/80 transition-all cursor-default">
+                    <td className="px-5 py-4">
+                      <div className="font-bold text-[#2D3748] whitespace-nowrap">{item.nome}</div>
+                      {/*<div className="text-[10px] text-[#A0AEC0] font-mono mt-0.5">#{item.lote}</div>*/}
+                    </td>
+                    <td className="px-4 py-4 whitespace-nowrap">
+                      <div className="font-semibold text-[#4A5568]">{item.qtd} un.</div>
+                      <div className="text-[11px] text-[#718096] italic">{item.peso}kg/un</div>
+                    </td>
+                    <td className="px-4 py-4 whitespace-nowrap">
+                      <span className={`px-2.5 py-1 rounded-md text-[11px] font-bold border ${getStatusColor(item.status)}`}>
+                        {item.status?.toUpperCase()}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-[#718096] text-xs font-medium max-w-[150px] truncate" title={item.origem}>
+                      {item.origem}
+                    </td>
+                    <td className="px-4 py-4 text-xs font-medium text-[#718096] whitespace-nowrap">
+                      {item.entrada}
+                    </td>
+                      <td className="px-4 py-4 text-xs font-semibold whitespace-nowrap">
+                        <div className="flex items-center gap-2">
+                          {/* O Indicador Visual (A Bolinha) */}
+                          {checkVencimentoProximo(item.validade) && item.qtd > 0 && (
+                            <span 
+                              className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" 
+                              title="Vencimento próximo (menos de 90 dias)"
+                            />
+                          )}
+                          
+                          <span className={`
+                            ${item.status?.toLowerCase() === 'esgotado' ? 'text-gray-300' : 'text-[#4A5568]'}
+                            ${checkVencimentoProximo(item.validade) && item.qtd > 0 ? 'text-amber-700' : ''}
+                          `}>
+                            {item.validade}
+                          </span>
+                        </div>
+                      </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-[500px] overflow-hidden">
+            <div className="flex justify-between items-center p-6 border-b border-gray-100">
+              <h2 className="text-xl font-bold">Cadastrar Produto</h2>
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="text-[#718096] hover:text-[#2D3748]"
+                aria-label="Fechar modal"
+              >
+                <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit}>
+              <div className="p-6 grid grid-cols-12 gap-4">
+                <div className="col-span-12">
+                  <label className="block text-sm font-medium mb-1 text-[#4A5568]" htmlFor="produto-nome">
+                    Nome do Produto
+                  </label>
+                  <input
+                    id="produto-nome"
+                    name="nome"
+                    value={formData.nome}
+                    onChange={handleInputChange}
+                    required
+                    type="text"
+                    placeholder="Ex: Arroz tipo 1 (5kg)"
+                    className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-1 focus:ring-[#007F45] focus:outline-none"
+                  />
+                </div>
+                <div className="col-span-12">
+                  <label className="block text-sm font-medium mb-1 text-[#4A5568]" htmlFor="produto-peso">
+                    Peso por unidade (Kg) — opcional
+                  </label>
+                  <input
+                    id="produto-peso"
+                    name="peso"
+                    value={formData.peso}
+                    onChange={handleInputChange}
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="Ex: 5.00"
+                    className="w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:ring-1 focus:ring-[#007F45] focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="p-6 border-t border-gray-100 flex justify-between items-center bg-gray-50">
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  className="text-[#718096] text-sm font-medium hover:text-[#2D3748]"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={salvando}
+                  className="bg-[#007F45] hover:bg-[#006838] disabled:opacity-60 text-white px-6 py-2 rounded-md font-medium text-sm shadow-sm transition-all"
+                >
+                  {salvando ? 'Salvando...' : 'Salvar Produto'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+Hook - useEstoque.js
+
+import { useState, useCallback } from 'react';
+
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5235/api';
+const ESTOQUE_URL = `${API_BASE_URL}/estoque`;
+const PRODUTO_URL = `${API_BASE_URL}/produto`;
+
+export function useEstoque() {
+  const [estoque, setEstoque] = useState([]);
+  const [alertasBaixoEstoque, setAlertasBaixoEstoque] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const getHeaders = () => ({
+    'Content-Type': 'application/json',
+  });
+
+  const handleResponse = async (response) => {
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      const serverMessage = errorData.message || 
+                            (errorData.errors ? Object.values(errorData.errors).flat().join(", ") : null);
+      throw new Error(serverMessage || 'Erro de comunicação com o servidor.');
+    }
+    return response.status === 204 ? null : response.json();
+  };
+
+  // 1. Listar Estoque Geral
+  const fetchEstoque = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(ESTOQUE_URL, { headers: getHeaders() });
+      const data = await handleResponse(response);
+      
+      // FILTRO: Removemos itens com quantidade 0 para não ocuparem espaço no relatório/lista
+      const estoqueFormatado = data
+        .filter(item => item.quantidade > 0) // <--- GARANTE QUE ITENS ZERADOS NÃO APAREÇAM
+        .map(item => ({
+          id: item.id,
+          produtoId: item.produtoId,
+          nome: item.produtoNome,
+          qtd: item.quantidade,
+          status: item.status,
+          peso: item.peso,
+          origem: item.origem,
+          validade: item.validade ? new Date(item.validade).toLocaleDateString('pt-BR') : 'N/A',
+          lote: item.loteCodigo || 'N/A', 
+          entrada: item.dataEntrada ? new Date(item.dataEntrada).toLocaleDateString('pt-BR') : 'N/A'
+        }));
+
+      setEstoque(estoqueFormatado);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  // 2. Buscar Alertas de Baixo Estoque
+  const fetchBaixoEstoque = useCallback(async (limite = 5) => {
+    try {
+      const response = await fetch(`${ESTOQUE_URL}/baixo-estoque?limite=${limite}`, { headers: getHeaders() });
+      const data = await handleResponse(response);
+      
+      // FILTRO: Baixo estoque significa que tem POUCO, não que tem ZERO.
+      // Se tiver zero, ele já saiu do estoque físico.
+      const apenasComAlgumaQuantidade = data.filter(item => item.quantidade > 0);
+      
+      setAlertasBaixoEstoque(apenasComAlgumaQuantidade);
+    } catch (err) {
+      console.error("Erro ao buscar alertas de estoque:", err);
+    }
+  }, []);
+
+  // 3. Cadastrar Novo Produto
+  const createProduto = async (produtoData) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const payload = {
+        Nome: produtoData.nome.trim(),
+        PesoKg: produtoData.peso ? parseFloat(produtoData.peso) : null
+      };
+
+      const response = await fetch(PRODUTO_URL, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify(payload),
+      });
+
+      const novoProduto = await handleResponse(response);
+      return { success: true, data: novoProduto };
+    } catch (err) {
+      setError(err.message);
+      return { success: false, message: err.message };
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return {
+    estoque,
+    alertasBaixoEstoque,
+    isLoading,
+    error,
+    fetchEstoque,
+    fetchBaixoEstoque,
+    createProduto,
+  };
+}
+
+
+Hook - useProdutos.js
+
+// src/hooks/useProdutos.js
+import { useState, useCallback } from 'react';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5235/api';
+
+export const useProdutos = () => {
+    const [produtos, setProdutos] = useState([]);
+    const [loading, setLoading] = useState(false);
+
+    const fetchProdutos = useCallback(async () => {
+        setLoading(true);
+        try {
+            // Supondo que você tenha um endpoint GET /api/produto
+            const response = await fetch(`${API_URL}/produto`);
+            if (response.ok) {
+                const data = await response.json();
+                setProdutos(data);
+            }
+        } catch (err) {
+            console.error("Erro ao carregar produtos:", err);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    return { produtos, loading, fetchProdutos };
+};

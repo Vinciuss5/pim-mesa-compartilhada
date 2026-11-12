@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Paleta extraída do design do sistema web (V5.0) -->
+    <color name="verde_primario">#007F45</color>
+    <color name="verde_escuro">#007B3E</color>
+    <color name="verde_claro">#4CAF50</color>
+    <color name="fundo_app">#F8F9FA</color>
+    <color name="texto_principal">#2D3748</color>
+    <color name="texto_secundario">#718096</color>
+    <color name="borda_card">#E2E8F0</color>
+    <color name="branco">#FFFFFF</color>
+    <color name="ic_launcher_background">#007F45</color>
+</resources>

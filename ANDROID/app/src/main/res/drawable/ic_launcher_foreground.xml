@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ícone do app: uma caixa de doação estilizada (heart + box). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="0.5"
+        android:scaleY="0.5"
+        android:pivotX="54"
+        android:pivotY="54">
+        <!-- Caixa -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M30,46 L54,34 L78,46 L78,74 L54,86 L30,74 Z" />
+        <path
+            android:fillColor="#007F45"
+            android:pathData="M54,42 L54,86 L78,74 L78,46 Z" />
+        <!-- Coração -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M54,58 C50,52 42,52 42,59 C42,66 54,72 54,72 C54,72 66,66 66,59 C66,52 58,52 54,58 Z" />
+    </group>
+</vector>

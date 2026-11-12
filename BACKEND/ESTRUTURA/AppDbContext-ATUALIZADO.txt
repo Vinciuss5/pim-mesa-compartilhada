@@ -1,0 +1,114 @@
+using Microsoft.EntityFrameworkCore;
+using EstoqueAPI.Models;
+
+namespace EstoqueAPI.Data
+{
+    public class AppDbContext : DbContext
+    {
+        public AppDbContext(DbContextOptions<AppDbContext> options) : base(options)
+        {
+        }
+
+        public DbSet<Usuario> Usuarios { get; set; }
+        public DbSet<Doador> Doadores { get; set; }
+        public DbSet<Produto> Produtos { get; set; }
+        public DbSet<Estoque> Estoque { get; set; }
+        public DbSet<Doacao> Doacoes { get; set; }
+        public DbSet<DoacaoItem> DoacaoItens { get; set; }
+        public DbSet<Solicitante> Solicitantes { get; set; }
+        public DbSet<Solicitacao> Solicitacoes { get; set; }
+        public DbSet<SolicitacaoItem> SolicitacaoItens { get; set; }
+        public DbSet<Logs> Logs { get; set; }
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+
+            // --- USUÁRIO ---
+            modelBuilder.Entity<Usuario>(entity => {
+                entity.HasIndex(u => u.Email).IsUnique();
+                entity.HasIndex(u => u.CPF).IsUnique();
+                entity.Property(u => u.CPF).HasColumnType("CHAR(11)");
+                entity.Property(u => u.Tipo).HasMaxLength(15);
+            });
+
+            // --- SOLICITANTE ---
+            modelBuilder.Entity<Solicitante>(entity => {
+                entity.HasIndex(s => s.CPF).IsUnique();
+                entity.Property(s => s.CPF).HasColumnType("CHAR(11)");
+            });
+
+            // --- SOLICITAÇÃO ---
+            modelBuilder.Entity<Solicitacao>(entity => {
+                entity.Property(s => s.Status).HasDefaultValue("PENDENTE").HasMaxLength(20);
+
+                // CORREÇÃO: Explicitando a conexão com a ICollection no Solicitante
+                entity.HasOne(s => s.Solicitante)
+                      .WithMany(sl => sl.Solicitacoes) // <-- Conecta com a lista no Solicitante
+                      .HasForeignKey(s => s.SolicitanteId)
+                      .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            // --- DOAÇÃO ---
+            modelBuilder.Entity<Doacao>(entity => {
+                // CORREÇÃO: Explicitando a conexão com a ICollection no Doador
+                entity.HasOne(d => d.Doador)
+                      .WithMany(dr => dr.Doacoes) // <-- Conecta com a lista no Doador
+                      .HasForeignKey(d => d.DoadorId)
+                      .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            // --- PRODUTO E ESTOQUE ---
+            modelBuilder.Entity<Produto>(entity => {
+                entity.Property(p => p.PesoKg).HasPrecision(18, 2);
+            });
+
+            modelBuilder.Entity<Estoque>(entity => {
+                entity.Property(e => e.Quantidade).HasPrecision(18, 2);
+
+                // CORREÇÃO: Conecta o Estoque à lista de Estoques no Produto
+                entity.HasOne(e => e.Produto)
+                      .WithMany(p => p.Estoques) // <-- Conecta com a lista no Produto
+                      .HasForeignKey(e => e.ProdutoId)
+                      .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            // --- RELACIONAMENTOS COMPOSIÇÃO (Cascade) ---
+            modelBuilder.Entity<DoacaoItem>(entity => {
+                entity.Property(di => di.Quantidade).HasPrecision(18, 2);
+                entity.HasOne(di => di.Doacao).WithMany(d => d.Itens)
+                      .HasForeignKey(di => di.DoacaoId).OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<SolicitacaoItem>(entity => {
+                entity.Property(si => si.Quantidade).HasPrecision(18, 2);
+                entity.HasOne(si => si.Solicitacao).WithMany(s => s.Itens)
+                      .HasForeignKey(si => si.SolicitacaoId).OnDelete(DeleteBehavior.Cascade);
+            });
+
+            // --- LOGS ---
+            modelBuilder.Entity<Logs>(entity => {
+                entity.HasOne(l => l.Usuario)
+                      .WithMany(u => u.Logs)
+                      .HasForeignKey(l => l.UsuarioId)
+                      .OnDelete(DeleteBehavior.Restrict); // Mudado para Restrict por segurança
+            });
+
+            // --- SEEDING (Versão Blindada) ---
+            modelBuilder.Entity<Usuario>().HasData(new Usuario
+            {
+                Id = 1,
+                Nome = "Administrador Sistema",
+                Email = "admin@mesa.com",
+                CPF = "12345678910",
+                // 1. REGRA DE OURO: Não gere o hash dinamicamente aqui se o erro persistir. 
+                // Coloque a string do hash que você gerou anteriormente.
+                SenhaHash = "$2a$12$Dx/Vcypz.HnIbCYjoauFqO1yRj2LMrB4BaUzn4o9trclbcM.wIl/K",
+                Tipo = "ADMIN",
+                Ativo = true,
+                // 2. REGRA DE OURO: Data fixa. Nunca use DateTime.Now aqui.
+                DataAdmissao = new DateTime(2026, 04, 01, 0, 0, 0, DateTimeKind.Utc)
+            });
+        }
+    }
+}

@@ -1,0 +1,894 @@
+---- DoacaoService ----
+
+using AutoMapper;
+using EstoqueAPI.Data;
+using EstoqueAPI.DTOs;
+using EstoqueAPI.Models;
+using Microsoft.EntityFrameworkCore;
+
+namespace EstoqueAPI.Services
+{
+    public class DoacaoService : IDoacaoService
+    {
+        private readonly AppDbContext _context;
+        private readonly IMapper _mapper;
+        private readonly ILogger<DoacaoService> _logger;
+
+        public DoacaoService(AppDbContext context, IMapper mapper, ILogger<DoacaoService> logger)
+        {
+            _context = context;
+            _mapper = mapper;
+            _logger = logger;
+        }
+
+        public async Task<IEnumerable<DoacaoResponseDTO>> ListarTodasAsync()
+        {
+            var doacoes = await _context.Doacoes
+                .Include(d => d.Doador)
+                .Include(d => d.Itens)
+                    .ThenInclude(i => i.Produto)
+                .AsNoTracking()
+                .OrderByDescending(d => d.Data)
+                .ToListAsync();
+
+            return _mapper.Map<IEnumerable<DoacaoResponseDTO>>(doacoes);
+        }
+
+        public async Task<DoacaoResponseDTO> CriarAsync(DoacaoCreateDTO dto)
+        {
+            var strategy = _context.Database.CreateExecutionStrategy();
+
+            return await strategy.ExecuteAsync(async () =>
+            {
+                // Inicia a transação. O 'using' garante o Rollback automático se o Commit não for chamado.
+                using var transaction = await _context.Database.BeginTransactionAsync();
+
+                try
+                {
+                    // 1. Mapeamento e Persistência da Doação
+                    var doacao = _mapper.Map<Doacao>(dto);
+                    _context.Doacoes.Add(doacao);
+
+                    // Salvamos para gerar o ID da doação e validar chaves estrangeiras (Doador/Produto)
+                    await _context.SaveChangesAsync();
+
+                    // 2. Processamento do Estoque (Lógica de Negócio)
+                    foreach (var item in doacao.Itens)
+                    {
+                        var estoqueItem = await _context.Estoque
+                            .FirstOrDefaultAsync(e => e.ProdutoId == item.ProdutoId && e.DataValidade == item.DataValidade);
+
+                        if (estoqueItem != null)
+                        {
+                            estoqueItem.Quantidade += item.Quantidade;
+                            estoqueItem.DataEntrada = doacao.Data;
+                        }
+                        else
+                        {
+                            _context.Estoque.Add(new Estoque
+                            {
+                                ProdutoId = item.ProdutoId,
+                                Quantidade = item.Quantidade,
+                                DataValidade = item.DataValidade,
+                                DataEntrada = doacao.Data,
+                                Origem = $"Doação #{doacao.Id}"
+                            });
+                        }
+                    }
+
+                    // 3. Salva as alterações de estoque
+                    await _context.SaveChangesAsync();
+
+                    // 4. Finalização
+                    await transaction.CommitAsync();
+
+                    // Recarga eficiente para retorno
+                    var resultado = await _context.Doacoes
+                        .Include(d => d.Doador)
+                        .Include(d => d.Itens).ThenInclude(i => i.Produto)
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(d => d.Id == doacao.Id);
+
+                    return _mapper.Map<DoacaoResponseDTO>(resultado);
+                }
+                catch (DbUpdateException ex)
+                {
+                    _logger.LogError(ex, "Erro de persistência ao salvar doação.");
+                    // Não chamamos Rollback manual aqui para evitar o erro de 'Transaction Completed'
+                    throw new InvalidOperationException("Erro de integridade no banco de dados. Verifique se o Doador e os Produtos existem.", ex);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Falha inesperada no processamento da doação.");
+                    throw;
+                }
+            });
+        }
+    }
+}
+
+---- IDoacaoService ---- //Interface
+
+using EstoqueAPI.DTOs;
+
+namespace EstoqueAPI.Services
+{
+    public interface IDoacaoService
+    {
+        Task<IEnumerable<DoacaoResponseDTO>> ListarTodasAsync();
+        Task<DoacaoResponseDTO> CriarAsync(DoacaoCreateDTO dto);
+    }
+}
+
+---- DoadorService ----
+
+using AutoMapper;
+using EstoqueAPI.Data;
+using EstoqueAPI.DTOs;
+using EstoqueAPI.Models;
+using Microsoft.EntityFrameworkCore;
+using static Microsoft.EntityFrameworkCore.DbLoggerCategory;
+
+namespace EstoqueAPI.Services
+{
+    public class DoadorService : IDoadorService
+    {
+        private readonly AppDbContext _context;
+        private readonly IMapper _mapper;
+
+        public DoadorService(AppDbContext context, IMapper mapper)
+        {
+            _context = context;
+            _mapper = mapper;
+        }
+
+        public async Task<IEnumerable<DoadorResponseDTO>> ListarTodosAsync(string? filtro)
+        {
+            // Iniciamos com IQueryable para compor a query no banco de dados (Server-side)
+            // O AsNoTracking() é essencial aqui: ganho de performance em consultas de leitura.
+            var query = _context.Doadores.AsNoTracking();
+
+            // Se o filtro não for nulo ou vazio, aplicamos a lógica de busca
+            if (!string.IsNullOrWhiteSpace(filtro))
+            {
+                filtro = filtro.Trim();
+
+                // O EF Core traduzirá isso para um comando SQL "WHERE Nome LIKE '%termo%' OR ..."
+                query = query.Where(d =>
+                            (d.Nome != null && d.Nome.Contains(filtro)) ||
+                            (d.Email != null && d.Email.Contains(filtro)) ||
+                            (d.CPF != null && d.CPF.Contains(filtro)));
+            }
+
+            var doadores = await query
+                .OrderBy(d => d.Nome)
+                .ToListAsync();
+
+            return _mapper.Map<IEnumerable<DoadorResponseDTO>>(doadores);
+        }
+
+        public async Task<DoadorResponseDTO?> BuscarPorIdAsync(int id)
+        {
+            var doador = await _context.Doadores.FindAsync(id);
+            return _mapper.Map<DoadorResponseDTO>(doador);
+        }
+
+        public async Task<DoadorResponseDTO> CriarAsync(DoadorCreateDTO dto)
+        {
+            // RN: Verificar se já existe doador com o mesmo CPF (se informado)
+            if (!string.IsNullOrEmpty(dto.CPF))
+            {
+                bool existe = await _context.Doadores.AnyAsync(d => d.CPF == dto.CPF);
+                if (existe) throw new Exception("Já existe um doador cadastrado com este CPF.");
+            }
+
+            var doador = _mapper.Map<Doador>(dto);
+
+            _context.Doadores.Add(doador);
+            await _context.SaveChangesAsync();
+
+            return _mapper.Map<DoadorResponseDTO>(doador);
+        }
+
+        public async Task<bool> AtualizarAsync(int id, DoadorUpdateDTO dto)
+        {
+            var doadorExistente = await _context.Doadores.FindAsync(id);
+
+            if (doadorExistente == null) return false;
+
+            // Mapeia as alterações do DTO para a Model rastreada
+            _mapper.Map(dto, doadorExistente);
+
+            await _context.SaveChangesAsync();
+            return true;
+        }
+
+        public async Task<bool> ExcluirAsync(int id)
+        {
+            var doador = await _context.Doadores.FindAsync(id);
+
+            if (doador == null) return false;
+
+            // RN: Antes de excluir, poderíamos verificar se ele tem doações vinculadas
+            // Para manter a integridade, o SQL Server impedirá a exclusão se houver doações.
+            _context.Doadores.Remove(doador);
+            await _context.SaveChangesAsync();
+            return true;
+        }
+    }
+}
+
+---- IDoadorService ---- //Interface
+
+using EstoqueAPI.DTOs;
+
+namespace EstoqueAPI.Services
+{
+    public interface IDoadorService
+    {
+        Task<IEnumerable<DoadorResponseDTO>> ListarTodosAsync(string? filtro);
+        Task<DoadorResponseDTO?> BuscarPorIdAsync(int id);
+        Task<DoadorResponseDTO> CriarAsync(DoadorCreateDTO dto);
+        Task<bool> AtualizarAsync(int id, DoadorUpdateDTO dto);
+        Task<bool> ExcluirAsync(int id);
+    }
+}
+
+---- EstoqueService ---- 
+
+using AutoMapper;
+using EstoqueAPI.Data;
+using EstoqueAPI.DTOs;
+using Microsoft.EntityFrameworkCore;
+
+namespace EstoqueAPI.Services
+{
+    public class EstoqueService : IEstoqueService
+    {
+        private readonly AppDbContext _context;
+        private readonly IMapper _mapper;
+
+        public EstoqueService(AppDbContext context, IMapper mapper)
+        {
+            _context = context;
+            _mapper = mapper;
+        }
+
+        public async Task<IEnumerable<EstoqueResponseDTO>> ListarEstoqueAtualAsync()
+        {
+            var estoque = await _context.Estoque
+                            .Include(e => e.Produto) // Traz a carga da tabela Produto
+                            .AsNoTracking()
+                            // Ordena os zerados para o final e depois por nome do produto
+                            .OrderByDescending(e => e.Quantidade > 0)
+                            .ThenBy(e => e.Produto != null ? e.Produto.Nome : string.Empty)
+                            .ToListAsync();
+
+            // O AutoMapper agora vai ler o EstoqueProfile e injetar o LoteCodigo e DataEntrada corretamente
+            return _mapper.Map<IEnumerable<EstoqueResponseDTO>>(estoque);
+        }
+
+        public async Task<EstoqueResponseDTO?> BuscarSaldoPorProdutoAsync(int produtoId)
+        {
+            // Padrão de Performance: Usar FirstOrDefaultAsync com critério de busca direto
+            var item = await _context.Estoque
+                .Include(e => e.Produto)
+                .AsNoTracking()
+                .FirstOrDefaultAsync(e => e.ProdutoId == produtoId);
+
+            return _mapper.Map<EstoqueResponseDTO>(item);
+        }
+
+        public async Task<IEnumerable<EstoqueResponseDTO>> ListarProdutosComBaixoEstoqueAsync(int limite)
+        {
+            if (limite < 0) return Enumerable.Empty<EstoqueResponseDTO>();
+
+            var baixoEstoque = await _context.Estoque
+                .Include(e => e.Produto)
+                // Usando < limite para garantir que "Esgotados" também entrem no radar se necessário,
+                // ou você pode adicionar && e.Quantidade > 0 se quiser separar Esgotado de Baixo Estoque
+                .Where(e => e.Quantidade <= (decimal)limite)
+                .AsNoTracking()
+                .OrderBy(e => e.Quantidade)
+                .ToListAsync();
+
+            return _mapper.Map<IEnumerable<EstoqueResponseDTO>>(baixoEstoque);
+        }
+    }
+}
+
+---- IEstoqueService ---- //Interface
+
+using EstoqueAPI.DTOs;
+
+namespace EstoqueAPI.Services
+{
+    public interface IEstoqueService
+    {
+        Task<IEnumerable<EstoqueResponseDTO>> ListarEstoqueAtualAsync();
+        Task<EstoqueResponseDTO?> BuscarSaldoPorProdutoAsync(int produtoId);
+        Task<IEnumerable<EstoqueResponseDTO>> ListarProdutosComBaixoEstoqueAsync(int limite);
+    }
+}
+
+---- ProdutoService ----
+
+using AutoMapper;
+using EstoqueAPI.Data;
+using EstoqueAPI.DTOs;
+using EstoqueAPI.Models;
+using Microsoft.EntityFrameworkCore;
+
+namespace EstoqueAPI.Services
+{
+    public class ProdutoService : IProdutoService
+    {
+        private readonly AppDbContext _context;
+        private readonly IMapper _mapper;
+
+        public ProdutoService(AppDbContext context, IMapper mapper)
+        {
+            _context = context;
+            _mapper = mapper;
+        }
+
+        public async Task<IEnumerable<ProdutoResponseDTO>> ListarTodosAsync()
+        {
+            var produtos = await _context.Produtos
+                .AsNoTracking()
+                .OrderBy(p => p.Nome)
+                .ToListAsync();
+
+            return _mapper.Map<IEnumerable<ProdutoResponseDTO>>(produtos);
+        }
+
+        public async Task<ProdutoResponseDTO?> BuscarPorIdAsync(int id)
+        {
+            var produto = await _context.Produtos.FindAsync(id);
+            return _mapper.Map<ProdutoResponseDTO>(produto);
+        }
+
+        public async Task<ProdutoResponseDTO> CriarAsync(ProdutoCreateDTO dto)
+        {
+            var produto = _mapper.Map<Produto>(dto);
+
+            _context.Produtos.Add(produto);
+            await _context.SaveChangesAsync();
+
+            return _mapper.Map<ProdutoResponseDTO>(produto);
+        }
+
+        public async Task<bool> AtualizarAsync(int id, ProdutoUpdateDTO dto)
+        {
+            var produtoExistente = await _context.Produtos.FindAsync(id);
+
+            if (produtoExistente == null) return false;
+
+            // Mapeia as alterações do DTO para a Model já rastreada pelo EF
+            _mapper.Map(dto, produtoExistente);
+
+            await _context.SaveChangesAsync();
+            return true;
+        }
+
+        public async Task<bool> ExcluirAsync(int id)
+        {
+            var produto = await _context.Produtos.FindAsync(id);
+
+            if (produto == null) return false;
+
+            _context.Produtos.Remove(produto);
+            await _context.SaveChangesAsync();
+            return true;
+        }
+    }
+}
+
+---- IProdutoService ---- //Interface
+
+using EstoqueAPI.DTOs;
+
+public interface IProdutoService
+{
+    Task<IEnumerable<ProdutoResponseDTO>> ListarTodosAsync();
+    Task<ProdutoResponseDTO?> BuscarPorIdAsync(int id);
+    Task<ProdutoResponseDTO> CriarAsync(ProdutoCreateDTO dto);
+    Task<bool> AtualizarAsync(int id, ProdutoUpdateDTO dto);
+    Task<bool> ExcluirAsync(int id);
+}
+
+---- SolicitacaoService ----
+
+using AutoMapper;
+using EstoqueAPI.Data;
+using EstoqueAPI.DTOs;
+using EstoqueAPI.Models;
+using Microsoft.EntityFrameworkCore;
+
+namespace EstoqueAPI.Services
+{
+    public class SolicitacaoService : ISolicitacaoService
+    {
+        private readonly AppDbContext _context;
+        private readonly IMapper _mapper;
+
+        public SolicitacaoService(AppDbContext context, IMapper mapper)
+        {
+            _context = context;
+            _mapper = mapper;
+        }
+
+        public async Task<IEnumerable<SolicitacaoResponseDTO>> ListarTodasAsync()
+        {
+            var solicitacoes = await _context.Solicitacoes
+                .Include(s => s.Solicitante)
+                .Include(s => s.Itens).ThenInclude(i => i.Produto)
+                .AsNoTracking()
+                .OrderByDescending(s => s.DataSolicitacao)
+                .ToListAsync();
+
+            return _mapper.Map<IEnumerable<SolicitacaoResponseDTO>>(solicitacoes);
+        }
+
+        public async Task<SolicitacaoResponseDTO> CriarAsync(SolicitacaoCreateDTO dto)
+        {
+            // Padrão de Resiliência: Iniciando transação para garantir atomicidade
+            using var transaction = await _context.Database.BeginTransactionAsync();
+
+            try
+            {
+                var solicitacao = _mapper.Map<Solicitacao>(dto);
+                solicitacao.DataSolicitacao = DateTime.Now;
+                solicitacao.Status = "PENDENTE";
+
+                _context.Solicitacoes.Add(solicitacao);
+                // Salvamos primeiro para gerar o ID da solicitação que será usado nos itens
+                await _context.SaveChangesAsync();
+
+                foreach (var itemDto in dto.Itens)
+                {
+                    // 1. Validação de Saldo (Agora usando decimal)
+                    decimal saldoTotal = await _context.Estoque
+                        .Where(e => e.ProdutoId == itemDto.ProdutoId)
+                        .SumAsync(e => e.Quantidade);
+
+                    if (saldoTotal < itemDto.Quantidade)
+                    {
+                        var produto = await _context.Produtos.FindAsync(itemDto.ProdutoId);
+                        string nomeProduto = produto?.Nome ?? $"ID {itemDto.ProdutoId}";
+                        throw new InvalidOperationException($"Saldo insuficiente para {nomeProduto}. Disponível: {saldoTotal}kg/un. Solicitado: {itemDto.Quantidade}kg/un.");
+                    }
+
+                    // 2. Lógica de Baixa de Estoque (PVPS - Primeiro que Vence, Primeiro que Sai)
+                    var lotesEstoque = await _context.Estoque
+                        .Where(e => e.ProdutoId == itemDto.ProdutoId && e.Quantidade > 0)
+                        .OrderBy(e => e.DataValidade) // Garante que itens vencendo logo saiam antes
+                        .ToListAsync();
+
+                    // CORREÇÃO: quantidadeNecessaria agora é decimal
+                    decimal quantidadeNecessaria = itemDto.Quantidade;
+
+                    foreach (var lote in lotesEstoque)
+                    {
+                        if (quantidadeNecessaria <= 0) break;
+
+                        if (lote.Quantidade >= quantidadeNecessaria)
+                        {
+                            lote.Quantidade -= quantidadeNecessaria;
+                            quantidadeNecessaria = 0;
+                        }
+                        else
+                        {
+                            quantidadeNecessaria -= lote.Quantidade;
+                            lote.Quantidade = 0;
+                        }
+                    }
+                }
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                return await BuscarPorIdAsync(solicitacao.Id)
+                    ?? throw new Exception("Erro ao recuperar solicitação criada.");
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                // Repassamos a exceção original ou uma personalizada para o Controller tratar
+                throw;
+            }
+        }
+
+        public async Task<SolicitacaoResponseDTO?> BuscarPorIdAsync(int id)
+        {
+            var solicitacao = await _context.Solicitacoes
+                .Include(s => s.Solicitante)
+                .Include(s => s.Itens)
+                    .ThenInclude(i => i.Produto)
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => s.Id == id);
+
+            return _mapper.Map<SolicitacaoResponseDTO>(solicitacao);
+        }
+
+        public async Task<bool> AtualizarStatusAsync(int id, string novoStatus)
+        {
+            var novoStatusUpper = novoStatus.ToUpper();
+
+            // 1. Iniciamos uma estratégia de execução e transação
+            var strategy = _context.Database.CreateExecutionStrategy();
+
+            return await strategy.ExecuteAsync(async () =>
+            {
+                using var transaction = await _context.Database.BeginTransactionAsync();
+                try
+                {
+                    // Carregamos a solicitação com os itens (necessário para o estorno)
+                    var solicitacao = await _context.Solicitacoes
+                        .Include(s => s.Itens)
+                        .FirstOrDefaultAsync(s => s.Id == id);
+
+                    if (solicitacao == null) return false;
+
+                    // Validação de Máquina de Estados (SRP)
+                    if (solicitacao.Status == novoStatusUpper) return true; // Já está no status
+                    if (solicitacao.Status == "CANCELADO" || solicitacao.Status == "ENTREGUE")
+                    {
+                        throw new InvalidOperationException($"Impossível alterar: Solicitação já está {solicitacao.Status}.");
+                    }
+
+                    // 2. Lógica de Estorno de Estoque
+                    if (novoStatusUpper == "CANCELADO" && solicitacao.Status == "PENDENTE")
+                    {
+                        foreach (var item in solicitacao.Itens)
+                        {
+                            // Tentamos encontrar o lote exato no estoque para devolver. 
+                            // Nota: Se você usa controle por Validade, precisamos garantir que o item da solicitação guarde essa info ou o lote id.
+                            var estoqueItem = await _context.Estoque
+                                .FirstOrDefaultAsync(e => e.ProdutoId == item.ProdutoId);
+
+                            if (estoqueItem != null)
+                            {
+                                estoqueItem.Quantidade += item.Quantidade;
+                            }
+                            else
+                            {
+                                // Caso o lote tenha sido deletado por erro humano, criamos um novo registro de devolução
+                                _context.Estoque.Add(new Estoque
+                                {
+                                    ProdutoId = item.ProdutoId,
+                                    Quantidade = item.Quantidade,
+                                    Origem = $"Estorno Solicitação #{solicitacao.Id}",
+                                    DataEntrada = DateTime.Now
+                                });
+                            }
+                        }
+                    }
+
+                    // 3. Atualiza o Status
+                    solicitacao.Status = novoStatusUpper;
+
+                    await _context.SaveChangesAsync();
+                    await transaction.CommitAsync();
+                    return true;
+                }
+                catch (Exception)
+                {
+                    await transaction.RollbackAsync();
+                    throw;
+                }
+            });
+        }
+    }
+}
+
+---- ISolicitacaoService ---- //Interface
+
+using EstoqueAPI.DTOs;
+
+namespace EstoqueAPI.Services
+{
+    public interface ISolicitacaoService
+    {
+        Task<IEnumerable<SolicitacaoResponseDTO>> ListarTodasAsync();
+
+        // Novo método: Necessário para o CreatedAtAction do Controller
+        Task<SolicitacaoResponseDTO?> BuscarPorIdAsync(int id);
+
+        Task<SolicitacaoResponseDTO> CriarAsync(SolicitacaoCreateDTO dto);
+
+        // Novo método: Para gerenciar o ciclo de vida (PENDENTE -> ENTREGUE)
+        Task<bool> AtualizarStatusAsync(int id, string novoStatus);
+    }
+}
+
+---- SolicitanteService ----
+
+using AutoMapper;
+using AutoMapper.QueryableExtensions;
+using EstoqueAPI.Data;
+using EstoqueAPI.DTOs;
+using EstoqueAPI.Models;
+using Microsoft.EntityFrameworkCore;
+
+namespace EstoqueAPI.Services
+{
+    public class SolicitanteService : ISolicitanteService
+    {
+        private readonly AppDbContext _context;
+        private readonly IMapper _mapper;
+
+        public SolicitanteService(AppDbContext context, IMapper mapper)
+        {
+            _context = context;
+            _mapper = mapper;
+        }
+
+        public async Task<IEnumerable<SolicitanteResponseDTO>> ListarTodosAsync(string? search = null)
+        {
+            // 1. Iniciamos a Query como IQueryable (nenhum SQL disparado ainda)
+            var query = _context.Solicitantes.AsNoTracking();
+
+            // 2. Filtro de busca aplicado antes da execução
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                // O EF Core traduzirá isso para um LIKE no SQL, prevenindo SQL Injection automaticamente
+                query = query.Where(s => s.Nome.Contains(search) || s.CPF.Contains(search));
+            }
+
+            // 3. Ordenação
+            query = query.OrderByDescending(s => s.DataCadastro);
+
+            // 4. A Mágica do AutoMapper (ProjectTo)
+            // Em vez de retornar a Entidade para depois mapear, o ProjectTo diz ao EF:
+            // "Gere um SELECT apenas com os campos necessários para preencher o SolicitanteResponseDTO"
+            return await query
+                .ProjectTo<SolicitanteResponseDTO>(_mapper.ConfigurationProvider)
+                .ToListAsync();
+        }
+
+        public async Task<SolicitanteResponseDTO?> BuscarPorIdAsync(int id)
+        {
+            // FindAsync é eficiente para buscas por Chave Primária
+            var solicitante = await _context.Solicitantes.FindAsync(id);
+            return _mapper.Map<SolicitanteResponseDTO>(solicitante);
+        }
+
+        public async Task<SolicitanteResponseDTO> CriarAsync(SolicitanteCreateDTO dto)
+        {
+            // RN: Validação de CPF duplicado (Substituindo o antigo 'Documento')
+            // O CPF agora é obrigatório conforme nossa nova Model
+            var existe = await _context.Solicitantes
+                .AnyAsync(s => s.CPF == dto.CPF);
+
+            if (existe)
+                throw new InvalidOperationException("Já existe um solicitante cadastrado com este CPF.");
+
+            // Mapeamento DTO -> Entity
+            var solicitante = _mapper.Map<Solicitante>(dto);
+
+            // Garantimos que a data de cadastro seja capturada no momento da persistência
+            solicitante.DataCadastro = DateTime.Now;
+
+            _context.Solicitantes.Add(solicitante);
+            await _context.SaveChangesAsync();
+
+            return _mapper.Map<SolicitanteResponseDTO>(solicitante);
+        }
+
+        public async Task<bool> AtualizarAsync(int id, SolicitanteUpdateDTO dto)
+        {
+            var existente = await _context.Solicitantes.FindAsync(id);
+            if (existente == null) return false;
+
+            // Validação de CPF para evitar duplicidade em atualizações
+            if (existente.CPF != dto.CPF)
+            {
+                var cpfEmUso = await _context.Solicitantes.AnyAsync(s => s.CPF == dto.CPF && s.Id != id);
+                if (cpfEmUso)
+                    throw new InvalidOperationException("Este CPF já está sendo utilizado por outro solicitante.");
+            }
+
+            // Atualiza as propriedades do objeto existente com os dados do DTO
+            _mapper.Map(dto, existente);
+
+            await _context.SaveChangesAsync();
+            return true;
+        }
+
+        public async Task<bool> ExcluirAsync(int id)
+        {
+            var solicitante = await _context.Solicitantes.FindAsync(id);
+            if (solicitante == null) return false;
+
+            // Nota do Tech Lead: Se houver solicitações vinculadas, o banco lançará uma 
+            // exceção de DbUpdateException devido à integridade referencial
+            try
+            {
+                _context.Solicitantes.Remove(solicitante);
+                await _context.SaveChangesAsync();
+                return true;
+            }
+            catch (DbUpdateException)
+            {
+                throw new InvalidOperationException("Não é possível excluir um solicitante que possui pedidos registrados.");
+            }
+        }
+    }
+}
+
+
+---- ISolicitanteService ---- //Interface
+
+using EstoqueAPI.DTOs;
+
+namespace EstoqueAPI.Services
+{
+    public interface ISolicitanteService
+    {
+        Task<IEnumerable<SolicitanteResponseDTO>> ListarTodosAsync(string? search = null);
+        Task<SolicitanteResponseDTO?> BuscarPorIdAsync(int id);
+        Task<SolicitanteResponseDTO> CriarAsync(SolicitanteCreateDTO dto);
+        Task<bool> AtualizarAsync(int id, SolicitanteUpdateDTO dto);
+        Task<bool> ExcluirAsync(int id);
+    }
+}
+
+---- UsuarioService ----
+
+using AutoMapper;
+using EstoqueAPI.Data;
+using EstoqueAPI.DTOs;
+using EstoqueAPI.Models;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
+
+namespace EstoqueAPI.Services
+{
+    public class UsuarioService : IUsuarioService
+    {
+        private readonly AppDbContext _context;
+        private readonly IMapper _mapper;
+        private readonly IConfiguration _config;
+
+        // Injetamos IConfiguration para ler a chave secreta do JWT do appsettings.json
+        public UsuarioService(AppDbContext context, IMapper mapper, IConfiguration config)
+        {
+            _context = context;
+            _mapper = mapper;
+            _config = config;
+        }
+
+        public async Task<IEnumerable<UsuarioResponseDTO>> ListarTodosAsync()
+        {
+            // AsNoTracking para performance, já que é apenas leitura
+            var usuarios = await _context.Usuarios.AsNoTracking().ToListAsync();
+            return _mapper.Map<IEnumerable<UsuarioResponseDTO>>(usuarios);
+        }
+
+        public async Task<UsuarioResponseDTO?> BuscarPorIdAsync(int id)
+        {
+            var usuario = await _context.Usuarios.AsNoTracking().FirstOrDefaultAsync(u => u.Id == id);
+            return usuario == null ? null : _mapper.Map<UsuarioResponseDTO>(usuario);
+        }
+
+        public async Task<UsuarioResponseDTO> CriarAsync(UsuarioCreateDTO dto)
+        {
+            // Regra de Negócio: E-mail deve ser único
+            var emailExiste = await _context.Usuarios.AnyAsync(u => u.Email == dto.Email);
+            if (emailExiste)
+                throw new Exception("Este e-mail já está em uso no sistema.");
+
+            var usuario = _mapper.Map<Usuario>(dto);
+
+            // SEGURANÇA: BCrypt gera um "Salt" automático e hashea a senha.
+            // NUNCA salvamos a senha em texto plano.
+            usuario.SenhaHash = BCrypt.Net.BCrypt.HashPassword(dto.Senha);
+            usuario.Ativo = true;
+
+            _context.Usuarios.Add(usuario);
+            await _context.SaveChangesAsync();
+
+            // Retornamos o DTO de resposta que propositalmente NÃO contém a senha
+            return _mapper.Map<UsuarioResponseDTO>(usuario);
+        }
+
+        public async Task<bool> AtualizarAsync(int id, UsuarioUpdateDTO dto)
+        {
+            var usuario = await _context.Usuarios.FindAsync(id);
+            if (usuario == null) return false;
+
+            // Se o e-mail estiver sendo alterado, precisamos validar se o novo e-mail já não existe
+            if (usuario.Email != dto.Email)
+            {
+                var emailExiste = await _context.Usuarios.AnyAsync(u => u.Email == dto.Email);
+                if (emailExiste) throw new Exception("O novo e-mail já está em uso.");
+            }
+
+            _mapper.Map(dto, usuario);
+            await _context.SaveChangesAsync();
+            return true;
+        }
+
+        public async Task<bool> InativarAsync(int id)
+        {
+            var usuario = await _context.Usuarios.FindAsync(id);
+            if (usuario == null) return false;
+
+            // Soft Delete: Apenas mudamos o status.
+            // Se deletarmos fisicamente, quebraremos a integridade referencial se ele fez alguma ação no sistema (Logs).
+            usuario.Ativo = false;
+            await _context.SaveChangesAsync();
+            return true;
+        }
+
+        public async Task<string> LoginAsync(LoginDTO dto)
+        {
+            // Busca apenas usuários ativos
+            var usuario = await _context.Usuarios.FirstOrDefaultAsync(u => u.Email == dto.Email && u.Ativo);
+
+            // SEGURANÇA: Prevenção contra enumeração de usuários.
+            // Se o e-mail não existe OU a senha está errada, a mensagem é a MESMA.
+            // O BCrypt.Verify pega a senha digitada, aplica o Salt salvo no banco e compara os Hashes.
+            if (usuario == null || !BCrypt.Net.BCrypt.Verify(dto.Senha, usuario.SenhaHash))
+                throw new UnauthorizedAccessException("E-mail ou senha inválidos.");
+
+            return GerarTokenJwt(usuario);
+        }
+
+        // Método privado: A responsabilidade de gerar o token é interna deste serviço.
+        private string GerarTokenJwt(Usuario usuario)
+        {
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var chaveSecreta = _config["Jwt:Key"];
+
+            if (string.IsNullOrEmpty(chaveSecreta))
+                throw new Exception("Chave JWT não configurada no sistema.");
+
+            var key = Encoding.ASCII.GetBytes(chaveSecreta);
+
+            // Claims são as "afirmações" ou dados embutidos dentro do token
+            var tokenDescriptor = new SecurityTokenDescriptor
+            {
+                Subject = new ClaimsIdentity(new[]
+                {
+                    new Claim(ClaimTypes.NameIdentifier, usuario.Id.ToString()),
+                    new Claim(ClaimTypes.Name, usuario.Nome),
+                    new Claim(ClaimTypes.Email, usuario.Email),
+                    // Esta Claim é a chave para o Controle de Acesso (RBAC) nos Controllers
+                    new Claim(ClaimTypes.Role, usuario.Tipo)
+                }),
+                Expires = DateTime.UtcNow.AddHours(8), // Token expira em 8 horas (jornada de trabalho)
+                SigningCredentials = new SigningCredentials(
+                    new SymmetricSecurityKey(key),
+                    SecurityAlgorithms.HmacSha256Signature)
+            };
+
+            var token = tokenHandler.CreateToken(tokenDescriptor);
+            return tokenHandler.WriteToken(token);
+        }
+    }
+}
+
+
+---- IUsuarioService ---- //Interface
+
+using EstoqueAPI.DTOs;
+
+namespace EstoqueAPI.Services
+{
+    public interface IUsuarioService
+    {
+        Task<IEnumerable<UsuarioResponseDTO>> ListarTodosAsync();
+        Task<UsuarioResponseDTO?> BuscarPorIdAsync(int id);
+        Task<UsuarioResponseDTO> CriarAsync(UsuarioCreateDTO dto);
+        Task<bool> AtualizarAsync(int id, UsuarioUpdateDTO dto);
+        Task<bool> InativarAsync(int id); // Soft Delete: Nunca deletamos usuários físicos para manter histórico
+        Task<string> LoginAsync(LoginDTO dto); // Retorna o Token JWT
+    }
+}
+
+

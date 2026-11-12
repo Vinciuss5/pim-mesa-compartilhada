@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Mesa Compartilhada</string>
+
+    <!-- Autenticação -->
+    <string name="login_titulo">Bem-vindo</string>
+    <string name="login_subtitulo">Acesse sua conta para gerenciar as doações.</string>
+    <string name="login_email">E-mail corporativo</string>
+    <string name="login_senha">Sua senha</string>
+    <string name="login_entrar">Entrar no Sistema</string>
+    <string name="login_manter_conectado">Manter conectado</string>
+
+    <!-- Navegação (drawer) -->
+    <string name="menu_principal">Principal</string>
+    <string name="menu_conta">Conta</string>
+    <string name="menu_funcionarios">Funcionários</string>
+    <string name="menu_doadores">Doadores</string>
+    <string name="menu_solicitantes">Solicitantes</string>
+    <string name="menu_estoque">Controle de Estoque</string>
+    <string name="menu_doacoes">Entrada de Doações</string>
+    <string name="menu_solicitacoes">Saída de Solicitações</string>
+    <string name="menu_relatorios">Relatórios</string>
+    <string name="menu_sair">Sair do Sistema</string>
+    <string name="menu_abrir">Abrir menu</string>
+
+    <!-- Ações comuns -->
+    <string name="acao_salvar">Salvar</string>
+    <string name="acao_cancelar">Cancelar</string>
+    <string name="acao_fechar">Fechar</string>
+    <string name="acao_novo">Novo</string>
+    <string name="acao_atualizar">Atualizar</string>
+    <string name="acao_remover">Remover</string>
+
+    <!-- Estados -->
+    <string name="estado_carregando">Carregando…</string>
+    <string name="estado_sem_dados">Nenhum registro encontrado.</string>
+    <string name="estado_erro">Erro ao carregar os dados.</string>
+
+    <!-- Títulos das telas -->
+    <string name="tela_funcionarios">Funcionários</string>
+    <string name="tela_doadores">Doadores</string>
+    <string name="tela_solicitantes">Solicitantes</string>
+    <string name="tela_estoque">Controle de Estoque</string>
+    <string name="tela_doacoes">Entrada de Doações</string>
+    <string name="tela_solicitacoes">Saída de Solicitações</string>
+    <string name="tela_relatorios">Relatórios</string>
+</resources>

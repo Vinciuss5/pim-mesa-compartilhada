@@ -1,0 +1,27 @@
+1. Auditoria e Rastreabilidade (O "Quem fez o quê?")
+Atualmente, suas tabelas Doacoes, Solicitacoes e Estoque não registram qual usuário realizou o lançamento.  
+
+Problema: Se uma quantidade de produto aparecer errada no estoque, você não saberá qual funcionário fez a entrada.
+
+Solução: Adicione uma coluna UsuarioId em todas as tabelas de movimentação (Doações, Solicitações e Estoque).  
+
+2. O Elo Perdido: Doação vs. Estoque
+Este é o ponto mais crítico da sua arquitetura atual. No SQL, a tabela DoacaoItens registra a intenção da doação, mas ela não está conectada à tabela Estoque.  
+
+Problema: Quando um item chega via doação, como ele entra no estoque? Se você apenas somar na tabela Estoque, perderá o vínculo de saber de qual doação específica aquele lote veio.
+
+Sugestão de Arquiteto: Adicione uma Foreign Key opcional em Estoque chamada DoacaoItemId. Isso permite rastrear o item desde o doador até a prateleira.
+
+3. Refinamento de Tipos de Dados e Performance
+Solicitantes (Documento): Você usou NVARCHAR(20). Como estamos no Brasil, recomendo padronizar para CPF/CNPJ. Se for apenas CPF, use CHAR(11). Se puder ser ambos, use VARCHAR(14) para economizar espaço e facilitar buscas por índice.  
+
+Logs (Acao): NVARCHAR(150) é pouco para logs detalhados. Recomendo usar NVARCHAR(MAX) ou pelo menos 500 para que você possa armazenar o estado anterior e o novo estado do objeto (JSON) em caso de erro ou auditoria.  
+
+DataAdmissão: Você usou DATETIME2(7). Para datas de calendário (sem necessidade de precisão de nanossegundos), o DATE ou DATETIME2(0) é mais que suficiente e ocupa menos espaço em disco.  
+
+4. Sugestões de Melhoria na Tabela Produtos
+Atualmente, você só tem Nome e PesoKg. Para uma gestão real, considere adicionar:  
+
+UnidadeMedida: (Ex: 'KG', 'UNIDADE', 'LITRO'). Nem tudo se pesa, algumas coisas se contam.
+
+CategoriaId: Para você conseguir filtrar o estoque por "Alimentos", "Higiene", "Roupas", etc.

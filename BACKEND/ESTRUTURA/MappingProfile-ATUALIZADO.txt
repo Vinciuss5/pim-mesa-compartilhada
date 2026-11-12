@@ -1,0 +1,116 @@
+---- MappingProfile ----
+
+using AutoMapper;
+using EstoqueAPI.Models;
+using EstoqueAPI.DTOs;
+
+namespace EstoqueAPI.Mappings
+{
+    public class MappingProfile : Profile
+    {
+        public MappingProfile()
+        {
+            // --- PRODUTO ---
+            CreateMap<Produto, ProdutoResponseDTO>();
+            CreateMap<ProdutoCreateDTO, Produto>();
+            CreateMap<ProdutoUpdateDTO, Produto>();
+
+            // --- DOADOR ---
+            CreateMap<Doador, DoadorResponseDTO>();
+            CreateMap<DoadorCreateDTO, Doador>();
+            CreateMap<DoadorUpdateDTO, Doador>();
+
+            // --- SOLICITANTE ---
+            CreateMap<Solicitante, SolicitanteResponseDTO>();
+            CreateMap<SolicitanteCreateDTO, Solicitante>();
+            CreateMap<SolicitanteUpdateDTO, Solicitante>();
+
+            // --- USUÁRIO ---
+            CreateMap<Usuario, UsuarioResponseDTO>();
+            CreateMap<UsuarioUpdateDTO, Usuario>();
+            CreateMap<UsuarioCreateDTO, Usuario>()
+                .ForMember(dest => dest.SenhaHash, opt => opt.Ignore())
+                .ForMember(dest => dest.DataAdmissao, opt => opt.MapFrom(src => DateTime.Now))
+                .ForMember(dest => dest.Ativo, opt => opt.MapFrom(src => true));
+
+            // --- ESTOQUE (O CORAÇÃO DA TELA) ---
+            CreateMap<Estoque, EstoqueResponseDTO>()
+                .ConstructUsing(src => new EstoqueResponseDTO(
+                    src.Id,
+                    src.ProdutoId,
+                    src.Produto != null ? src.Produto.Nome : "Produto não encontrado",
+                    src.Quantidade,
+                    DeterminarStatusEstoque(src.Quantidade),
+                    src.Produto != null ? (src.Produto.PesoKg ?? 0m) : 0m,
+                    src.Origem ?? "Não informada",
+                    src.DataValidade,
+                    // ADICIONADOS PARA RASTREABILIDADE:
+                    src.LoteCodigo ?? "N/A",
+                    src.DataEntrada
+                ));
+
+            CreateMap<Estoque, EstoqueSimplesDTO>()
+                .ConstructUsing(src => new EstoqueSimplesDTO(
+                    src.ProdutoId,
+                    src.Quantidade
+                ));
+
+            // --- DOAÇÃO ITEM ---
+            CreateMap<DoacaoItemCreateDTO, DoacaoItem>();
+            CreateMap<DoacaoItem, DoacaoItemResponseDTO>()
+                .ConstructUsing(src => new DoacaoItemResponseDTO(
+                    src.Id,
+                    src.ProdutoId,
+                    src.Produto != null ? src.Produto.Nome : "Desconhecido",
+                    src.Quantidade,
+                    src.DataValidade
+                ));
+
+            // --- DOAÇÃO (CABECALHO) ---
+            CreateMap<Doacao, DoacaoResponseDTO>()
+                .ConstructUsing((src, context) => new DoacaoResponseDTO(
+                    src.Id,
+                    src.DoadorId,
+                    src.Doador != null ? src.Doador.Nome : "Doador não informado",
+                    src.Data,
+                    context.Mapper.Map<List<DoacaoItemResponseDTO>>(src.Itens)
+                ));
+
+            // --- SOLICITAÇÃO ITEM ---
+            CreateMap<SolicitacaoItemCreateDTO, SolicitacaoItem>();
+            CreateMap<SolicitacaoItem, SolicitacaoItemResponseDTO>()
+                .ConstructUsing(src => new SolicitacaoItemResponseDTO(
+                    src.Id,
+                    src.ProdutoId,
+                    src.Produto != null ? src.Produto.Nome : "Produto não encontrado",
+                    src.Quantidade
+                ));
+
+            // --- SOLICITAÇÃO (CABECALHO) ---
+            CreateMap<Solicitacao, SolicitacaoResponseDTO>()
+                .ConstructUsing((src, context) => new SolicitacaoResponseDTO(
+                    src.Id,
+                    src.SolicitanteId,
+                    src.Solicitante != null ? src.Solicitante.Nome : "Solicitante não informado",
+                    src.DataSolicitacao,
+                    src.Status.ToString(),
+                    src.Observacao,
+                    context.Mapper.Map<List<SolicitacaoItemResponseDTO>>(src.Itens)
+                ));
+
+            // Mapeamentos de entrada (Create)
+            CreateMap<DoacaoCreateDTO, Doacao>();
+            CreateMap<SolicitacaoCreateDTO, Solicitacao>();
+        }
+
+        private static string DeterminarStatusEstoque(decimal quantidade)
+        {
+            return quantidade switch
+            {
+                <= 0 => "Esgotado",
+                <= 5 => "Baixo estoque", // Ajustado para bater com o CSS do seu Front
+                _ => "Disponível"
+            };
+        }
+    }
+}
